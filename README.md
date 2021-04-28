@@ -4,7 +4,7 @@ Simple inverse reinforcement learning using RRT as trajectory sampling algorithm
 # Usage
 ```bash
 cd scripts
-python3 irl_rrt_train.py
+python3 irl_rrt_train.py --visualize_trajs
 ```
 
 The task is to navigate from start (0, 0) to goal (1, 1). There are two features for each state: 1. distance to goal at (1, 1) and 2. distance to an attractor at (0, 1). The true weights are (0.1, 0.9), which is used by the expert to generate demonstrations. As a result, the sampled expert trajectories bend upwards. 
@@ -26,7 +26,7 @@ The figure below shows the learned and true weights during training.
 We can also use a neural network to model the cost function instead of the linear feature model used above. 
 ```bash
 cd scripts
-python3 irl_rrt_nn_train.py
+python3 irl_rrt_nn_train.py --visualize_trajs
 ```
 
 After a few iterations, we can get sampled agent paths like

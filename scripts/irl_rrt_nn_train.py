@@ -148,7 +148,7 @@ def main():
     # convert to dictionary
     params = vars(args)
 
-    trainer = RRTMaxEntIRL_Trainer(params)
+    trainer = RRTIRL_Trainer(params)
     trainer.training_loop()
 
 if __name__ == '__main__':
