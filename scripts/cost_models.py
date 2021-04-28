@@ -80,7 +80,7 @@ class MLPCost(nn.Module):
             n_layers=self.n_layers,
             size=self.size,
             activation='relu',
-            output_activation='relu' 
+            output_activation='sigmoid' 
         ).to(ptu.device)
 
         self.optimizer = optim.Adam(
@@ -107,7 +107,8 @@ class MLPCost(nn.Module):
 
     def calc_cost(self, state):
         """ Agent cost function for arriving at state """
-        cost = ptu.to_numpy(self(np.array(state)))
+        state = np.array(state).reshape(1, -1)
+        cost = ptu.to_numpy(self(state))[0,0]
         return cost
 
     def forward(self, x):
@@ -116,7 +117,7 @@ class MLPCost(nn.Module):
         """
         x = ptu.from_numpy(x)
         c = self.cost_fn(x)
-        c += 1e-6
+        #c += 1e-6
         return c
 
     def update(self, agent_trajs, expert_trajs):
@@ -136,8 +137,10 @@ class MLPCost(nn.Module):
 #        margin = torch.linalg.norm(agent_features - expert_features)
 #        print("Margin:", ptu.to_numpy(margin))
         
+        print(torch.mean(expert_costs).item(), torch.mean(agent_costs).item())
+
         loss = torch.mean(expert_costs) + torch.log(torch.mean(torch.exp(-agent_costs)))
-        #loss = torch.mean(expert_costs) - torch.mean(agent_costs) - margin
+        #loss = torch.mean(expert_costs) -  torch.mean(agent_costs) - margin
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -160,43 +163,8 @@ class MLPCost(nn.Module):
         The return costs are flattened
         """
         trajs = np.array([state for traj in trajs for state in traj])
-        costs = self.forward(trajs)
-        print(trajs)
-        print(costs)
+        costs = self.forward(trajs)        
         return costs
-
-#class CostNet(nn.Module):
-#    def __init__(self):
-#        super().__init__()#
-
-#        self.dtype = torch.float32
-#        self.device = 'cpu'
-#        self.weight = nn.Parameter(torch.tensor([1., 0.], dtype=self.dtype, device=self.device))
-#        self.goal = torch.tensor([0., 0.], dtype=self.dtype, device=self.device)#
-
-#    def forward(self, state):
-#        return F.softmax(self.weight).T @ self.feature(state)#
-#
-
-#    def feature(self, state):
-#        """
-#        Returns the feature vector of a state (x, y)
-#        Feature 1 is the distance to goal (0, 0)
-#        Feature 2 is the Mahalanobis distance to the Gaussian at (-0.5, -0.5)
-#        """
-#        f1 = torch.linalg.norm(state - self.goal)
-#        #f2 = np.sqrt((state-self.mu) @ self.inv_cov @ (state-self.mu).T)
-#        f2 = np.linalg.norm(state - torch.tensor([-1., 0.], dtype=self.dtype, device=self.device))
-#        return torch.tensor([f1, f2], dtype=self.dtype, device=self.device)#
-#
-
-#    def update(self, agent_trajs, expert_trajs):
-#        """
-#        Update the cost weights given agent and expert trajectories
-#        Objective is to maximize the expert trajectory likelihood
-#        """#
-
-#        # Loss is the negative log likelihood of 
 
 
 

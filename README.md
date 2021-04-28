@@ -22,3 +22,14 @@ After training the sampled agent paths look like
 The figure below shows the learned and true weights during training. 
 
 ![](./imgs/weights.png)
+
+We can also use a neural network to model the cost function instead of the linear feature model used above. 
+```bash
+cd scripts
+python3 irl_rrt_nn_train.py
+```
+
+After a few iterations, we can get sampled agent paths like
+
+![](./imgs/nn_agent_trajs_iter4.png)
+
