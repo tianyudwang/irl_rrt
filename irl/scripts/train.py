@@ -34,7 +34,7 @@ class Trainer():
         train_args = {
             'reward_updates_per_iter': params['reward_updates_per_iter'],
             'transitions_per_reward_update': params['transitions_per_reward_update'],
-            'agent_actions_per_demo_transition': params['agent_actions_per_demo_transition']
+#            'agent_actions_per_demo_transition': params['agent_actions_per_demo_transition']
         }
 
         agent_params = {**computation_graph_args, **train_args}
@@ -253,10 +253,10 @@ def main():
         '--transitions_per_reward_update', type=int, default=100,
         help='Number of agent transitions per reward update'
     )
-    parser.add_argument(
-        '--agent_actions_per_demo_transition', type=int, default=1,
-        help='Number of agent actions sampled for each expert_transition'
-    )
+#    parser.add_argument(
+#        '--agent_actions_per_demo_transition', type=int, default=1,
+#        help='Number of agent actions sampled for each expert_transition'
+#    )
 #    parser.add_argument(
 #        '--rrt_runs', type=int, default=1,
 #        help='Number of RRT* runs to estimate cost to go'
@@ -275,7 +275,7 @@ def main():
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--no_gpu', '-ngpu', action='store_true')
     parser.add_argument('--which_gpu', '-gpu_id', default=0)
-    parser.add_argument('--video_log_freq', type=int, default=200)
+    parser.add_argument('--video_log_freq', type=int, default=-1)
     parser.add_argument('--scalar_log_freq', type=int, default=10)
     parser.add_argument('--save_params', action='store_true')
     
