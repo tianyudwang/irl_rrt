@@ -34,32 +34,50 @@ class MLPReward(nn.Module):
             self.learning_rate
         )
 
-    def forward(self, x, nx):
+    def forward(self, x1, x2):
         """
-        Computes the reward of motion from x to nx using MLP
-        x, nx are np.array and r is torch.tensor
+        Computes the reward of motion from x1 to x2 using MLP
+        x1, x2 are np.array (batch_size, ob_dim) and r is torch.tensor (batch_size, 1)
+        This implementation ensures learned cost (-r(x1, x2)) is a metric
         """
-        x = ptu.from_numpy(x)
-        nx = ptu.from_numpy(nx)
-        x = torch.cat((x, nx), dim=-1)
-        # Ensure the reward is non-positive with sigmoid activation in last layer
+        x = torch.cat((ptu.from_numpy(x1), ptu.from_numpy(x2)), dim=-1)
         r = -self.mlp(x)
+#        h1 = self.mlp(ptu.from_numpy(x1))
+#        h2 = self.mlp(ptu.from_numpy(x2))
+#        r = -torch.linalg.norm(h1 - h2, dim=-1, keepdim=True)    # ensure reward is non-positive
         return r
 
-    def cost_fn(self, state, next_state):
+    def cost_fn(self, x1, x2):
         """
-        Compute cost for motion between state and next state
+        Compute cost for motion between state x1 and next state x2
         """
-        state = state.reshape(1, self.ob_dim)
-        next_state = next_state.reshape(1, self.ob_dim)
-        cost = -ptu.to_numpy(self(state, next_state)).item()
-        return cost
+        return -self.reward_fn(x1, x2)
 
-    def update(self, demo_paths, agent_paths):
-        demo_costs = self.calc_path_cost(demo_paths)
-        agent_costs = self.calc_path_cost(agent_paths)
+    def reward_fn(self, x1, x2):
+        """
+        Compute reward for motion between state x1 and next state x2
+        """
+        x1 = x1.reshape(1, self.ob_dim)
+        x2 = x2.reshape(1, self.ob_dim)
+        r = ptu.to_numpy(self(x1, x2)).item()
+        return r
 
-        loss = torch.mean(demo_costs) - torch.mean(agent_costs)
+    def update(self, demo_paths, agent_paths, agent_log_probs):
+        """
+        Reward function update
+        """
+        demo_rewards = self.calc_path_rewards(demo_paths)
+        agent_rewards = self.calc_path_rewards(agent_paths)
+        agent_log_probs = torch.unsqueeze(ptu.from_numpy(agent_log_probs), dim=-1)
+
+        demo_Q = torch.sum(demo_rewards, dim=2, keepdim=False)
+        agent_Q = torch.sum(agent_rewards, dim=2, keepdim=False)
+
+        demo_loss = -torch.sum(demo_Q)
+        agent_loss = torch.sum(agent_Q)
+        #agent_loss = torch.sum(torch.log(torch.mean(torch.exp(agent_Q - agent_log_probs), dim=1)))
+
+        loss = demo_loss + agent_loss
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -67,59 +85,15 @@ class MLPReward(nn.Module):
         train_reward_log = {
             "Reward_loss": ptu.to_numpy(loss)
         }
-        print("Reward training loss:", ptu.to_numpy(loss))
+
+        print("Reward training loss:", loss.item(), demo_loss.item(), agent_loss.item())
         return train_reward_log
         
-    def calc_path_cost(self, paths):
+    def calc_path_rewards(self, paths):
         """
-        Calculate the cost of a list of paths
-        The returned costs are flattened
+        Calculate the rewards of transitions
         """
-        states = np.array([path[i] for path in paths for i in range(len(path)-1)])
-        next_states = np.array([path[i+1] for path in paths for i in range(len(path)-1)])
-        costs = self.forward(states, next_states)
-        return costs
-
-#    def update(self, demo_obs, demo_acs, sample_obs, sample_acs, log_probs):
-#        """
-#        Computes the loss and updates the reward parameters
-#        Objective is to maximize sum of demo rewards and minimize sum of sample rewards
-#        Use importance sampling for policy samples
-#        Recall that the MLE objective to maximize is:
-#            1/N sum_{i=1}^N return(tau_i) - log Z
-#          = 1/N sum_{i=1}^N return(tau_i) - log E_{tau ~ p(tau)} [exp(return(tau))]
-#          = 1/N sum_{i=1}^N return(tau_i) - log E_{tau ~ q(tau)} [p(tau) / q(tau) * exp(return(tau))]
-#          = 1/N sum_{i=1}^N return(tau_i) - log (sum_j exp(return(tau_j)) * w(tau_j) / sum_j w(tau_j))
-#        where w(tau) = p(tau) / q(tau) = 1 / prod_t pi(a_t|s_t) 
-#        """
-#        demo_obs = ptu.from_numpy(demo_obs)
-#        demo_acs = ptu.from_numpy(demo_acs)
-#        sample_obs = ptu.from_numpy(sample_obs)
-#        sample_acs = ptu.from_numpy(sample_acs)
-#        #log_probs = torch.squeeze(ptu.from_numpy(log_probs), dim=-1)#
-
-#        demo_costs = -self(demo_obs, demo_acs)
-#        sample_costs = -self(sample_obs, sample_acs)
-#        # using 1/N sum_{i=1}^N return(tau_i) - log 1/M (sum_j exp(return(tau_j)) / prod_t pi(a_t|s_t) )
-##        w = sample_return - torch.sum(log_probs, dim=1)
-##        w_max = torch.max(w)#
-
-#        # TODO: Use importance sampling to estimate sample return 
-#        # trick to avoid overflow: log(exp(x1) + exp(x2)) = x + log(exp(x1-x) + exp(x2-x)) where x = max(x1, x2)
-#        #loss = -torch.mean(demo_return) + torch.log(torch.sum(torch.exp(w-w_max))) + w_max
-#        
-#        print(torch.mean(demo_costs).item(), torch.mean(sample_costs).item())
-#        #loss = torch.mean(demo_costs) - torch.mean(sample_costs) #
-
-#        probs = 1
-#        loss = torch.mean(demo_costs) + torch.log(torch.mean(torch.exp(-sample_costs)/(probs+1e-7)))
-#        
-#        self.optimizer.zero_grad()
-#        loss.backward()
-#        self.optimizer.step()#
-
-#        train_reward_log = {
-#            "Reward_loss": ptu.to_numpy(loss)
-#        }
-#        print("Reward training loss:", ptu.to_numpy(loss))
-#        return train_reward_log
+        states, next_states = paths[:,:,:-1,:], paths[:,:,1:,:]
+        rewards = self.forward(states, next_states)
+        
+        return rewards

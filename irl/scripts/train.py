@@ -34,7 +34,7 @@ class Trainer():
         train_args = {
             'reward_updates_per_iter': params['reward_updates_per_iter'],
             'transitions_per_reward_update': params['transitions_per_reward_update'],
-#            'agent_actions_per_demo_transition': params['agent_actions_per_demo_transition']
+            'agent_actions_per_demo_transition': params['agent_actions_per_demo_transition']
         }
 
         agent_params = {**computation_graph_args, **train_args}
@@ -81,7 +81,6 @@ class Trainer():
 
         # Are the observations images?
         img = len(self.env.observation_space.shape) > 2
-        #import pdb; pdb.set_trace()
         # Observation and action sizes
         ob_dim = self.env.observation_space.shape if img else self.env.observation_space.shape[0]
         ac_dim = self.env.action_space.shape[0]
@@ -95,40 +94,44 @@ class Trainer():
         self.start_time = time.time()
 
         # Collect expert demonstrations
-        demo_paths = self.collect_demo_trajectories(self.params['expert_policy'], self.params['demo_size'])
+        demo_paths = self.collect_demo_trajectories(
+            self.params['expert_policy'], self.params['demo_size'])
         self.agent.add_to_buffer(demo_paths, demo=True)
 
         for itr in range(self.params['n_iter']):
             print("\n********** Iteration {} ************".format(itr))
 
             # decide if videos should be rendered/logged at this iteration
-            if (itr+1) % self.params['video_log_freq'] == 0 and self.params['video_log_freq'] != -1:
+            if ((itr+1) % self.params['video_log_freq'] == 0 
+                and self.params['video_log_freq'] != -1):
                 self.log_video = True
             else:
                 self.log_video = False
             # decide if metrics should be logged
-            if (itr+1) % self.params['scalar_log_freq'] == 0 and self.params['scalar_log_freq'] != -1:
+            if ((itr+1) % self.params['scalar_log_freq'] == 0 
+                and self.params['scalar_log_freq'] != -1):
                 self.logmetrics = True
             else:
                 self.logmetrics = False
 
             # Collect agent demonstrations
-            agent_paths, train_video_paths = self.collect_agent_trajectories(self.agent.actor, self.params['demo_size'])
+            agent_paths, train_video_paths = self.collect_agent_trajectories(
+                self.agent.actor, self.params['demo_size'])
             self.agent.add_to_buffer(agent_paths)
 
             reward_logs = self.agent.train_reward()
 
-            policy_logs = self.agent.train_policy()
+            for step in range(self.params['policy_updates_per_iter']):
+                policy_logs = self.agent.train_policy()
 
             # log/save
             if self.log_video or self.logmetrics:
-                self.agent.actor.save("SAC_NavEnv-v0_itr_{}".format(itr))
+                self.agent.actor.save("../models/SAC_NavEnv-v0_itr_{}".format(itr))
                 # perform logging
                 print('\nBeginning logging procedure...')
                 self.perform_logging(
                     itr, agent_paths, self.agent.actor, 
-                    train_video_paths, reward_logs, policy_logs
-                )
+                    train_video_paths, reward_logs, policy_logs)
                 if self.params['save_params']:
                     self.agent.save('{}/agent_itr_{}.pt'.format(self.params['logdir'], itr))
 
@@ -142,8 +145,8 @@ class Trainer():
         expert_policy = SAC.load(expert_policy)
         print('\nRunning expert policy to collect demonstrations...')
         demo_paths = utils.sample_trajectories(
-            self.env, expert_policy, batch_size
-        )
+            self.env, expert_policy, batch_size)
+        #demo_paths = utils.pad_absorbing_states(demo_paths)
         return demo_paths
 
     def collect_agent_trajectories(self, collect_policy, batch_size):
@@ -157,20 +160,18 @@ class Trainer():
         """
         print("\nCollecting agent trajectories to be used for training...")
         paths = utils.sample_trajectories(
-            self.env, collect_policy, batch_size
-        )
+            self.env, collect_policy, batch_size)
+        #paths = utils.pad_absorbing_states(paths)
 
-        # TODO: add logging and training videos
         train_video_paths = None
         if self.log_video:
             print('\nCollecting train rollouts to be used for saving videos...')
-            ## TODO look in utils and implement sample_n_trajectories
-            train_video_paths, _ = utils.sample_trajectories(
-                self.env, collect_policy, MAX_NVIDEO, render=True
-            )
+            train_video_paths = utils.sample_trajectories(
+                self.env, collect_policy, MAX_NVIDEO, render=True)
         return paths, train_video_paths
 
-    def perform_logging(self, itr, paths, eval_policy, train_video_paths, reward_logs, policy_logs):
+    def perform_logging(self, itr, paths, eval_policy, train_video_paths, 
+                        reward_logs, policy_logs):
 
         last_log = reward_logs[-1]
 
@@ -181,18 +182,21 @@ class Trainer():
         eval_paths = utils.sample_trajectories(
             self.env, eval_policy, 
             self.params['eval_batch_size'], render=False
-        )
+        )  
 
         # save eval rollouts as videos in tensorboard event file
         if self.log_video and train_video_paths != None:
-            eval_video_paths = utils.sample_trajectories(self.env, eval_policy, MAX_NVIDEO, render=True)
+            eval_video_paths = utils.sample_trajectories(
+                self.env, eval_policy, MAX_NVIDEO, render=True)
 
             #save train/eval videos
             print('\nSaving train and eval rollouts as videos...')
-            self.logger.log_paths_as_videos(train_video_paths, itr, fps=self.fps, max_videos_to_save=MAX_NVIDEO,
-                                            video_title='train_rollouts')
-            self.logger.log_paths_as_videos(eval_video_paths, itr, fps=self.fps, max_videos_to_save=MAX_NVIDEO,
-                                             video_title='eval_rollouts')
+            self.logger.log_paths_as_videos(
+                train_video_paths, itr, fps=self.fps, 
+                max_videos_to_save=MAX_NVIDEO, video_title='train_rollouts')
+            self.logger.log_paths_as_videos(
+                eval_video_paths, itr, fps=self.fps, 
+                max_videos_to_save=MAX_NVIDEO, video_title='eval_rollouts')
 
         #######################
 
@@ -250,13 +254,17 @@ def main():
         help='Number of reward updates per iteration'
     )
     parser.add_argument(
+        '--policy_updates_per_iter', type=int, default=10,
+        help='Number of policy updates per iteration'
+    )
+    parser.add_argument(
         '--transitions_per_reward_update', type=int, default=100,
         help='Number of agent transitions per reward update'
     )
-#    parser.add_argument(
-#        '--agent_actions_per_demo_transition', type=int, default=1,
-#        help='Number of agent actions sampled for each expert_transition'
-#    )
+    parser.add_argument(
+        '--agent_actions_per_demo_transition', type=int, default=1,
+        help='Number of agent actions sampled for each expert_transition'
+    )
 #    parser.add_argument(
 #        '--rrt_runs', type=int, default=1,
 #        help='Number of RRT* runs to estimate cost to go'
@@ -270,13 +278,13 @@ def main():
     parser.add_argument('--n_layers', '-l', type=int, default=2)
     parser.add_argument('--size', '-s', type=int, default=64)
     parser.add_argument('--output_size', type=int, default=1)
-    parser.add_argument('--learning_rate', '-lr', type=float, default=5e-3)
+    parser.add_argument('--learning_rate', '-lr', type=float, default=0.01)
 
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--no_gpu', '-ngpu', action='store_true')
     parser.add_argument('--which_gpu', '-gpu_id', default=0)
     parser.add_argument('--video_log_freq', type=int, default=-1)
-    parser.add_argument('--scalar_log_freq', type=int, default=10)
+    parser.add_argument('--scalar_log_freq', type=int, default=1)
     parser.add_argument('--save_params', action='store_true')
     
     args = parser.parse_args()

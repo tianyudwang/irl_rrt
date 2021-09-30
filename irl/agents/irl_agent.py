@@ -2,6 +2,7 @@
 import numpy as np
 import gym
 from stable_baselines3 import SAC
+import multiprocessing as mp
 
 from ompl import util as ou
 from ompl import base as ob
@@ -12,6 +13,8 @@ from irl.scripts.replay_buffer import ReplayBuffer
 from irl.agents.mlp_reward import MLPReward
 import irl.scripts.pytorch_util as ptu 
 import irl.scripts.utils as utils
+
+import time 
 
 # Custom env wrapper to change reward function
 class NavIRLEnv(gym.Wrapper):
@@ -25,13 +28,14 @@ class NavIRLEnv(gym.Wrapper):
         Override the true environment reward with learned reward
         """
         obs, reward, done, info = self.env.step(action)
-        #reward = self.reward(self.last_obs, obs).item()
-        self.last_obs = obs 
+        reward = self.reward.reward_fn(self.last_obs, obs)
+        self.last_obs = obs.copy()
         return obs, reward, done, info
 
     def reset(self):
-        self.last_obs = self.env.reset()
-        return self.last_obs
+        obs = self.env.reset()
+        self.last_obs = obs.copy()
+        return obs
 
 ## @cond IGNORE
 # Our "collision checker". For this demo, our robot's state space
@@ -85,6 +89,7 @@ class IRL_Agent(BaseAgent):
 
         # RRT
         self.state_dim = self.agent_params['ob_dim']
+        self.goal = np.array([1.0, 1.0])
         self.init_RRT()
 
         # Replay buffer to hold demo transitions (maximum transitions)
@@ -96,20 +101,63 @@ class IRL_Agent(BaseAgent):
         Train the reward function
         """
         print('\nTraining agent reward function...')
-        num_transitions = self.agent_params['transitions_per_reward_update']
-        demo_transitions = self.sample_transitions(num_transitions, demo=True)
-        agent_transitions = self.sample_transitions(num_transitions)
+        demo_transitions = self.sample_transitions(
+            self.agent_params['transitions_per_reward_update'], 
+            demo=True)
+
+        agent_transitions = self.sample_transitions(
+            self.agent_params['transitions_per_reward_update'])
 
         # Update OMPL SimpleSetup object cost function with current learned reward
         self.update_ss_cost(self.reward.cost_fn)
 
-        demo_paths = self.plan_optimal_paths(demo_transitions)
-        agent_paths = self.plan_optimal_paths(agent_transitions)
+        demo_paths = []
+        agent_paths = []
+        agent_log_probs = []
+
+        start_time = time.time()
+        for i in range(self.agent_params['transitions_per_reward_update']):
+            # Sample expert transitions (s, a, s')
+            # and find optimal path from s' to goal
+            ob, ac, log_probs, rewards, next_ob, done = [var[i] for var in demo_transitions]
+            path = self.RRT_plan(next_ob)
+            path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
+            demo_paths.append([path])
+            
+            # and find optimal path from s'_a to goal
+            paths = []
+            log_probs = []
+            for j in range(self.agent_params['agent_actions_per_demo_transition']):
+                # Sample agent transitions (s, a, s') at each expert state s
+                agent_ac, _ = self.actor.predict(ob)
+                log_prob = utils.get_log_prob(self.actor, agent_ac)
+                agent_next_ob = self.env.one_step_transition(ob, agent_ac)
+
+                # Find optimal path from s' to goal
+                path = self.RRT_plan(agent_next_ob)
+                path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
+                paths.append(path)
+                log_probs.append(log_prob)
+            agent_paths.append(paths)
+            agent_log_probs.append(log_probs)
+
+        demo_paths = self.collate_fn(demo_paths)
+        agent_paths = self.collate_fn(agent_paths)
+        agent_log_probs = np.array(agent_log_probs)
 
         reward_logs = []
-        for i in range(self.agent_params['reward_updates_per_iter']):
-            reward_logs.append(self.reward.update(demo_paths, agent_paths))
+        for step in range(self.agent_params['reward_updates_per_iter']):
+            reward_logs.append(self.reward.update(demo_paths, agent_paths, agent_log_probs))
         return reward_logs
+
+    def collate_fn(self, paths):
+        """
+        Pad the list of variable-length paths with goal locations
+        """
+        T = max([len(p) for path_l in paths for p in path_l])
+        paths = np.array([[np.pad(p, ((0, T-p.shape[0]),(0,0)), 'edge') 
+                 for p in path_l] for path_l in paths])
+        return paths
 
     def plan_optimal_paths(self, transitions):
         """
@@ -120,7 +168,6 @@ class IRL_Agent(BaseAgent):
         for i in range(num_transitions):
             obs, ac, rew, next_obs, done = [var[i] for var in transitions]
             path = self.RRT_plan(next_obs)
-            path = np.concatenate((obs.reshape(1, self.state_dim), path), axis=0)
             paths.append(path)
         return paths
 
@@ -146,16 +193,19 @@ class IRL_Agent(BaseAgent):
         si.setup()
         self.si = si
 
-        # Simple setup instance that contains the 
+        # Simple setup instance that contains the space information
         ss = og.SimpleSetup(si)
 
         # Set the agent goal state
         goal = ob.State(space)
-        goal[0], goal[1] = 1.0, 1.0  
+        goal[0], goal[1] = self.goal[0], self.goal[1]  
         ss.setGoalState(goal)
 
         # Set up RRT* planner
-        ss.setPlanner(og.RRTstar(si))
+        planner = og.RRTstar(si)
+        # Set the maximum length of a motion
+        planner.setRange(0.1)
+        ss.setPlanner(planner)
         self.ss = ss
 
     def update_ss_cost(self, cost_fn):
@@ -163,9 +213,8 @@ class IRL_Agent(BaseAgent):
         costObjective = getIRLCostObjective(self.si, cost_fn)
         self.ss.setOptimizationObjective(costObjective)
 
-    def RRT_plan(self, start_state, solveTime=0.1):
+    def RRT_plan(self, start_state, solveTime=0.5):
         """
-        :param ss: OMPL SimpleSetup object, initialized with RRT* planner
         :param start_state: start location of the planning problem
         :param solveTime: allowed planning budget
         :return:
@@ -180,14 +229,20 @@ class IRL_Agent(BaseAgent):
         self.ss.setStartState(start)
 
         # solve and get optimal path
-        solved = self.ss.solve(solveTime)
+        # TODO: current termination condition is a fixed amount of time for planning
+        # Change to exactSolnPlannerTerminationCondition when an exact but suboptimal 
+        # path is found
+        while not self.ss.getProblemDefinition().hasExactSolution():
+            solved = self.ss.solve(solveTime)
+
         if solved:
             path = self.ss.getSolutionPath().printAsMatrix() 
             path = np.fromstring(path, dtype=float, sep='\n').reshape(-1, self.state_dim)
         else:
-            print("OMPL is not able to solve under current cost function")
+            raise ValueError("OMPL is not able to solve under current cost function")
             path = None
         return path
+
 
     def train_policy(self):
         """

@@ -61,10 +61,13 @@ class NavEnv(gym.Env):
 
         self.step_count += 1
         self.update_states(action)
+        #self.pos = self.one_step_transition(self.pos, action)
 
         # Observation is the position 
-        obs = self.pos
-        reward = self.eval_reward(self.pos)
+        obs = np.copy(self.pos)
+        reward = self.eval_reward(obs)
+
+        reward *= self.gamma**self.step_count 
 
         done = False
         # Done if reached maximum steps or reached goal 
@@ -84,6 +87,19 @@ class NavEnv(gym.Env):
         obs[agent_idx[0], agent_idx[1]] = np.array([255, 0, 0])
         return obs
 
+    def one_step_transition(self, pos, action):
+        """
+        Update the position with a simple dynamics model
+        x = x + u * dt
+        Force the position and action within bounds [-self.size, self.size]
+        """
+        action[action > self.size] = self.size
+        action[action < -self.size] = -self.size
+        pos += action * self.dt 
+        pos[pos > self.size] = self.size
+        pos[pos < -self.size] = -self.size
+        return pos
+
     def update_states(self, action):
         """
         Update the position with a simple dynamics model
@@ -92,14 +108,13 @@ class NavEnv(gym.Env):
         """
         action[action > self.size] = self.size
         action[action < -self.size] = -self.size
-        self.pos += action * self.dt
+        self.pos += action * self.dt 
         self.pos[self.pos > self.size] = self.size
         self.pos[self.pos < -self.size] = -self.size
 
-
     def reset(self):
         """
-        Randomly spawn a starting location
+        Randomly spawn a starting location / Spawn at lower left
         """
 #        self.pos = np.random.uniform(
 #            low=-self.size, 
@@ -152,6 +167,9 @@ class NavEnv(gym.Env):
         The reward is a Gaussian at [0, 1]
         
         """
+        # discount
+        self.gamma = 0.99
+        
         self.mixtures = {
             'A': [-2],
             'mu': [np.array([-self.size, self.size], dtype=float)],
@@ -192,7 +210,7 @@ class NavEnv(gym.Env):
 
         # add +5 reward if reached goal
         if self.is_goal(x):
-            reward += 20
+            reward += 10
 
 #        # shape reward to [-1, 1] to assist learning
 #        reward = (reward - self.reward_min) / (self.reward_max - self.reward_min) * 2 - 1
