@@ -2,15 +2,12 @@
 import numpy as np
 import gym
 from stable_baselines3 import SAC
-import multiprocessing as mp
-
-from ompl import util as ou
-from ompl import base as ob
-from ompl import geometric as og
 
 from irl.agents.base_agent import BaseAgent 
 from irl.scripts.replay_buffer import ReplayBuffer
 from irl.agents.mlp_reward import MLPReward
+from irl.agents.rrt_planner import RRTPlanner
+from irl.agents.prm_planner import PRMPlanner
 import irl.scripts.pytorch_util as ptu 
 import irl.scripts.utils as utils
 
@@ -37,31 +34,7 @@ class NavIRLEnv(gym.Wrapper):
         self.last_obs = obs.copy()
         return obs
 
-## @cond IGNORE
-# Our "collision checker". For this demo, our robot's state space
-# lies in [-1,1]x[-1,1], without any obstacles. The checker trivially
-# returns true for any state
-class ValidityChecker(ob.StateValidityChecker):
-    # Returns whether the given state's position overlaps the
-    # circular obstacle
-    def isValid(self, state):
-        return True
 
-## Defines an optimization objective by computing the cost of motion between 
-# two endpoints.
-class IRLCostObjective(ob.OptimizationObjective):
-    def __init__(self, si, cost_fn):
-        super(IRLCostObjective, self).__init__(si)
-        self.cost_fn = cost_fn
-    
-    def motionCost(self, s1, s2):
-        s1 = np.array([s1[0], s1[1]])
-        s2 = np.array([s2[0], s2[1]])
-        c = self.cost_fn(s1, s2)
-        return ob.Cost(c)
-
-def getIRLCostObjective(si, cost_fn):
-    return IRLCostObjective(si, cost_fn)
 
 class IRL_Agent(BaseAgent):
     def __init__(self, env, agent_params):
@@ -87,10 +60,11 @@ class IRL_Agent(BaseAgent):
         # actor/policy with wrapped env
         self.actor = SAC("MlpPolicy", self.irl_env, verbose=1)
 
-        # RRT
         self.state_dim = self.agent_params['ob_dim']
+        # Bound in each dimension
+        self.bounds = np.array([-1.0, 1.0])
         self.goal = np.array([1.0, 1.0])
-        self.init_RRT()
+        self.planner = PRMPlanner(self.state_dim, self.bounds, self.goal)
 
         # Replay buffer to hold demo transitions (maximum transitions)
         self.demo_buffer = ReplayBuffer(1000)
@@ -109,7 +83,7 @@ class IRL_Agent(BaseAgent):
             self.agent_params['transitions_per_reward_update'])
 
         # Update OMPL SimpleSetup object cost function with current learned reward
-        self.update_ss_cost(self.reward.cost_fn)
+        self.planner.update_ss_cost(self.reward.cost_fn)
 
         demo_paths = []
         agent_paths = []
@@ -120,7 +94,7 @@ class IRL_Agent(BaseAgent):
             # Sample expert transitions (s, a, s')
             # and find optimal path from s' to goal
             ob, ac, log_probs, rewards, next_ob, done = [var[i] for var in demo_transitions]
-            path = self.RRT_plan(next_ob)
+            path = self.planner.plan(next_ob)
             path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
             demo_paths.append([path])
             
@@ -134,7 +108,7 @@ class IRL_Agent(BaseAgent):
                 agent_next_ob = self.env.one_step_transition(ob, agent_ac)
 
                 # Find optimal path from s' to goal
-                path = self.RRT_plan(agent_next_ob)
+                path = self.planner.plan(agent_next_ob)
                 path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
                 paths.append(path)
                 log_probs.append(log_prob)
@@ -159,89 +133,17 @@ class IRL_Agent(BaseAgent):
                  for p in path_l] for path_l in paths])
         return paths
 
-    def plan_optimal_paths(self, transitions):
-        """
-        For each transition (s, a, s'), we find the optimal path from s' to goal
-        """
-        num_transitions = transitions[0].shape[0]
-        paths = []
-        for i in range(num_transitions):
-            obs, ac, rew, next_obs, done = [var[i] for var in transitions]
-            path = self.RRT_plan(next_obs)
-            paths.append(path)
-        return paths
-
-    def init_RRT(self):
-        """
-        Initialize an ompl::geometric::SimpleSetup instance
-        Check out https://ompl.kavrakilab.org/genericPlanning.html
-        """
-        # Set log to warn/info/debug
-        ou.setLogLevel(ou.LOG_WARN)
-        # Construct the state space in which we're planning. We're
-        # planning in [-1,1]x[-1,1], a subset of R^2.
-        space = ob.RealVectorStateSpace(self.state_dim)  
-        # Set the bounds of space to be in [-1,1].
-        space.setBounds(-1.0, 1.0)   
-        self.space = space
-
-        # Construct a space information instance for this state space
-        si = ob.SpaceInformation(space) 
-        # Set the object used to check which states in the space are valid
-        validityChecker = ValidityChecker(si)
-        si.setStateValidityChecker(validityChecker) 
-        si.setup()
-        self.si = si
-
-        # Simple setup instance that contains the space information
-        ss = og.SimpleSetup(si)
-
-        # Set the agent goal state
-        goal = ob.State(space)
-        goal[0], goal[1] = self.goal[0], self.goal[1]  
-        ss.setGoalState(goal)
-
-        # Set up RRT* planner
-        planner = og.RRTstar(si)
-        # Set the maximum length of a motion
-        planner.setRange(0.1)
-        ss.setPlanner(planner)
-        self.ss = ss
-
-    def update_ss_cost(self, cost_fn):
-        # Set up cost function
-        costObjective = getIRLCostObjective(self.si, cost_fn)
-        self.ss.setOptimizationObjective(costObjective)
-
-    def RRT_plan(self, start_state, solveTime=0.5):
-        """
-        :param start_state: start location of the planning problem
-        :param solveTime: allowed planning budget
-        :return:
-            path
-        """
-        # Clear previous planning data, does not affect settings and start/goal
-        self.ss.clear()
-
-        # Reset the start state
-        start = ob.State(self.space)
-        start[0], start[1] = start_state[0].item(), start_state[1].item() 
-        self.ss.setStartState(start)
-
-        # solve and get optimal path
-        # TODO: current termination condition is a fixed amount of time for planning
-        # Change to exactSolnPlannerTerminationCondition when an exact but suboptimal 
-        # path is found
-        while not self.ss.getProblemDefinition().hasExactSolution():
-            solved = self.ss.solve(solveTime)
-
-        if solved:
-            path = self.ss.getSolutionPath().printAsMatrix() 
-            path = np.fromstring(path, dtype=float, sep='\n').reshape(-1, self.state_dim)
-        else:
-            raise ValueError("OMPL is not able to solve under current cost function")
-            path = None
-        return path
+#    def plan_optimal_paths(self, transitions):
+#        """
+#        For each transition (s, a, s'), we find the optimal path from s' to goal
+#        """
+#        num_transitions = transitions[0].shape[0]
+#        paths = []
+#        for i in range(num_transitions):
+#            obs, ac, rew, next_obs, done = [var[i] for var in transitions]
+#            path = self.RRT_plan(next_obs)
+#            paths.append(path)
+#        return paths
 
 
     def train_policy(self):
