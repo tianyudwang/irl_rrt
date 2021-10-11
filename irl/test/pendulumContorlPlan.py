@@ -45,10 +45,6 @@ except ImportError:
     from ompl import geometric as og
 
 
-global steps
-steps = []
-
-
 def angle_normalize(x) -> float:
     """Converts angles outside of +/-PI to +/-PI"""
     return ((x + np.pi) % (2 * np.pi)) - np.pi
@@ -99,21 +95,23 @@ def propagate(
     assert -max_torque <= u <= max_torque, f"Control input u is out of bounds: {u}"
 
     newthdot = th_dot + (3.0 * g / (2.0 * l) * np.sin(th) + 3.0 / (m * l ** 2) * u) * dt
-    newthdot = np.clip(newthdot, -max_speed, max_speed)
+    newthdot = np.clip(
+        newthdot, -max_speed, max_speed
+    )  # This clip is needed or use VectorBound.enforceBounds()
     assert (
         -max_speed <= newthdot <= max_speed
     ), f"New State theta_dot is out of bounds: {newthdot}"
 
     newth = th + newthdot * dt
-    newth = angle_normalize(newth)
-    assert -pi <= newth <= pi, f"New State theta is out of bounds: {newth}"
+    # newth = angle_normalize(newth)
+    # assert -pi <= newth <= pi, f"New State theta is out of bounds: {newth}"
 
     state[0].value = newth
     state[1][0] = newthdot
 
+    # * This part is doing the angle normalization
     SO2 = ob.SO2StateSpace()
     SO2.enforceBounds(state[0])
-    assert state[0].value == newth and state[1][0] == newthdot
 
 
 def init_rrt(param: Dict[str, Any]):
@@ -165,7 +163,7 @@ def init_rrt(param: Dict[str, Any]):
     # Set the start and goal states
     ss.setStartAndGoalStates(start, goal, 0.05)
 
-    # Creat planner
+    # Creat RRT planner from oc
     si = ss.getSpaceInformation()
     planner = oc.RRT(si)
     # *Set the maximum length of a motion (Only planner from og has this method)
@@ -173,7 +171,8 @@ def init_rrt(param: Dict[str, Any]):
 
     # Set the planner to the SimpleSetup
     ss.setPlanner(planner)
-    #  set propagation step size -> duration of each step
+    # Set propagation step size -> duration of each step
+    # *(Not using this in propagation_fn, instead uses a constont dt = 0.05)
     si.setPropagationStepSize(0.05)
     # Set optimization objective
     ss.setOptimizationObjective(ob.PathLengthOptimizationObjective(si))
@@ -186,7 +185,7 @@ def plan(ss: ob.SpaceInformation, param: Dict[str, Any], runtime: float):
     controlPath = None
     geometricPath = None
     if solved:
-        # print the path to screen
+        # Print the path to screen
         controlPath = ss.getSolutionPath()
         controlPath.interpolate()
         geometricPath = controlPath.asGeometric()
@@ -287,6 +286,7 @@ if __name__ == "__main__":
     else:
         ou.OMPL_ERROR("Invalid log-level integer.")
 
+    # Set the random seed
     np.seterr(all="raise")
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -331,20 +331,16 @@ if __name__ == "__main__":
     ic(geometricPath_np, geometricPath_np.shape)
 
     # Get info
-    si = ss.getSpaceInformation()
-    pdf = ss.getProblemDefinition()
-    cspace = ss.getControlSpace()
-    state_propagator = ss.getStatePropagator()
-    planner = ss.getPlanner()
-    goal_bias = planner.getGoalBias()
+    # si = ss.getSpaceInformation()
+    # pdf = ss.getProblemDefinition()
+    # cspace = ss.getControlSpace()
+    # state_propagator = ss.getStatePropagator()
+    # planner = ss.getPlanner()
+    # goal_bias = planner.getGoalBias()
 
     # Get controls
     controls = controlPath.getControls()
-    U = [i[0] for i in controls]
-    control_count = controlPath.getControlCount()
-    state_count = controlPath.getStateCount()
-    ic(state_count, control_count)
-    # import ipdb; ipdb.set_trace()
+    U = [u[0] for u in controls]
 
     # Plot the path
     # path = geometricPath_np
