@@ -72,7 +72,11 @@ class Trainer():
     def init_env(self):
         if self.params['env_name'] == 'NavEnv-v0':
             import gym_nav
-            self.env = gym.make('NavEnv-v0')
+            self.env = gym.make(self.params['env_name'])
+        if self.params['env_name'] == 'Pendulum-v0':
+            from pendulum_env_wrapper import PendulumWrapper
+            env = gym.make(self.params['env_name'])
+            self.env = PendulumWrapper(env)
         else:
             raise ValueError('Environment {} is not supported'.format(self.params['env_name']))
 
@@ -241,7 +245,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_name', type=str, default='NavEnv-v0')
     parser.add_argument('--exp_name', type=str, default='NavEnv-v0')
-    parser.add_argument('--expert_policy', type=str, default='SAC_NavEnv-v0')               # relative to where you're running this script from
+    parser.add_argument('--expert_policy', type=str, default='SAC_NavEnv-v0')        
     parser.add_argument(
         '--n_iter', '-n', type=int, default=100,
         help='Number of total iterations')

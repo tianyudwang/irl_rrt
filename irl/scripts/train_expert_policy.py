@@ -10,20 +10,26 @@ def build_env(env_name):
     if env_name == 'NavEnv-v0':
         import gym_nav
         env = gym.make(env_name)
+    elif env_name == 'Pendulum-v0':
+        env = gym.make(env_name)
+        from pendulum_env_wrapper import PendulumWrapper
+        env = PendulumWrapper(env)
     else:
         raise ValueError('Environment {} not supported yet ...'.format(env_name))
     return env
 
-def train_policy(
-        env, 
-        algo='SAC', 
-        timesteps=100000):
+def train_policy(env, algo, resume_training, policy_name, 
+                 timesteps=100000):
     """
     Train the expert policy in RL
     """
     if algo == 'SAC':
         from stable_baselines3 import SAC
-        model = SAC("MlpPolicy", env, verbose=1)
+        
+        if resume_training:
+            model = SAC.load(policy_name)
+        else:
+            model = SAC("MlpPolicy", env, verbose=1)
         model.learn(total_timesteps=timesteps, log_interval=4)
     else:
         raise ValueError('RL algorithm {} not supported yet ...'.format(algo))
@@ -51,14 +57,13 @@ def main():
     parser.add_argument('--env_name', type=str, default='NavEnv-v0')
     parser.add_argument('--algo', type=str, default='SAC')
     parser.add_argument('--resume_training', action='store_true')
-    parser.add_argument('--policy_name', type=str, default='SAC_NavEnv-v0')
     args = parser.parse_args()
 
     env = build_env(args.env_name)
-
-    model = train_policy(env, args.algo)
-
-    save_policy(model, args.policy_name)
+    
+    policy_name = args.algo + '_' + args.env_name
+    model = train_policy(env, args.algo, args.resume_training, policy_name)
+    save_policy(model, policy_name)
 
     visualize_policy(env, model)
 

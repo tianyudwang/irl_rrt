@@ -10,31 +10,8 @@ from irl.agents.rrt_planner import RRTPlanner
 from irl.agents.prm_planner import PRMPlanner
 import irl.scripts.pytorch_util as ptu 
 import irl.scripts.utils as utils
-
-import time 
-
-# Custom env wrapper to change reward function
-class NavIRLEnv(gym.Wrapper):
-    def __init__(self, env, reward):
-        gym.Wrapper.__init__(self, env)
-        self.env = env
-        self.reward = reward
-
-    def step(self, action):
-        """
-        Override the true environment reward with learned reward
-        """
-        obs, reward, done, info = self.env.step(action)
-        reward = self.reward.reward_fn(self.last_obs, obs)
-        self.last_obs = obs.copy()
-        return obs, reward, done, info
-
-    def reset(self):
-        obs = self.env.reset()
-        self.last_obs = obs.copy()
-        return obs
-
-
+from irl.agents.irl_env_wrapper import IRLEnv
+from irl.agents.base_planner_pendulum import SSTPlanner
 
 class IRL_Agent(BaseAgent):
     def __init__(self, env, agent_params):
@@ -55,20 +32,19 @@ class IRL_Agent(BaseAgent):
         )
         
         # create a wrapper env with learned reward
-        self.irl_env = NavIRLEnv(self.env, self.reward)
+        self.irl_env = IRLEnv(self.env, self.reward)
 
         # actor/policy with wrapped env
         self.actor = SAC("MlpPolicy", self.irl_env, verbose=1)
 
         self.state_dim = self.agent_params['ob_dim']
-        # Bound in each dimension
-        self.bounds = np.array([-1.0, 1.0])
-        self.goal = np.array([1.0, 1.0])
-        self.planner = PRMPlanner(self.state_dim, self.bounds, self.goal)
+
+#        self.planner = PRMPlanner(self.state_dim, self.bounds, self.goal)
+        self.planner = SSTPlanner()
 
         # Replay buffer to hold demo transitions (maximum transitions)
-        self.demo_buffer = ReplayBuffer(1000)
-        self.sample_buffer = ReplayBuffer(1000)
+        self.demo_buffer = ReplayBuffer(10000)
+        self.sample_buffer = ReplayBuffer(10000)
 
     def train_reward(self):
         """
@@ -89,12 +65,11 @@ class IRL_Agent(BaseAgent):
         agent_paths = []
         agent_log_probs = []
 
-        start_time = time.time()
         for i in range(self.agent_params['transitions_per_reward_update']):
             # Sample expert transitions (s, a, s')
             # and find optimal path from s' to goal
             ob, ac, log_probs, rewards, next_ob, done = [var[i] for var in demo_transitions]
-            path = self.planner.plan(next_ob)
+            path, controls = self.planner.plan(next_ob)
             path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
             demo_paths.append([path])
             
@@ -107,8 +82,9 @@ class IRL_Agent(BaseAgent):
                 log_prob = utils.get_log_prob(self.actor, agent_ac)
                 agent_next_ob = self.env.one_step_transition(ob, agent_ac)
 
+                
                 # Find optimal path from s' to goal
-                path = self.planner.plan(agent_next_ob)
+                path, controls = self.planner.plan(agent_next_ob)
                 path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
                 paths.append(path)
                 log_probs.append(log_prob)
