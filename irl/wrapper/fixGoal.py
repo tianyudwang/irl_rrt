@@ -36,11 +36,12 @@ class FixGoal(gym.Wrapper):
 
     def reset(self):
         obs = self.env.reset()
+        # ! The following line does not work. Maybe because the refernce issue
+        # self.env.goal = self.pos
         self.env.goal[0] = self.pos[0]
         self.env.goal[1] = self.pos[1]
         self.env.goal[2] = self.pos[2]
 
-        # ! The following line does not work
-        # self.env.goal = self.pos
+        
         obs[0:3] = self.env.goal.copy()
         return obs
