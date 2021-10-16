@@ -17,6 +17,9 @@ import matplotlib.pyplot as plt
 from matplotlib import animation
 from matplotlib.animation import FuncAnimation
 
+import ompl_utils
+
+
 try:
     from icecream import install  # noqa
 
@@ -43,11 +46,6 @@ except ImportError:
     from ompl import base as ob
     from ompl import control as oc
     from ompl import geometric as og
-
-
-def angle_normalize(x) -> float:
-    """Converts angles outside of +/-PI to +/-PI"""
-    return ((x + np.pi) % (2 * np.pi)) - np.pi
 
 
 def isStateValid(si: ob.SpaceInformation, state: ob.State) -> bool:
@@ -102,9 +100,9 @@ def propagate(
         -max_speed <= newthdot <= max_speed
     ), f"New State theta_dot is out of bounds: {newthdot}"
 
+    # This might violate bounds
     newth = th + newthdot * dt
-    # newth = angle_normalize(newth)
-    # assert -pi <= newth <= pi, f"New State theta is out of bounds: {newth}"
+    # newth = ompl_utils.angle_normalize(newth)
 
     state[0].value = newth
     state[1][0] = newthdot
@@ -112,6 +110,9 @@ def propagate(
     # * This part is doing the angle normalization
     SO2 = ob.SO2StateSpace()
     SO2.enforceBounds(state[0])
+    assert (
+        -pi <= state[0].value <= pi
+    ), f"New State theta is out of bounds: {state[0].value}"
 
 
 def init_rrt(param: Dict[str, Any]):
@@ -246,7 +247,7 @@ def plot_xy_space(plan_path, render=False):
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(description="Optimal motion planning with control")
     p.add_argument(
         "--env_id",
         "-env",
@@ -276,20 +277,14 @@ if __name__ == "__main__":
 
     args = p.parse_args()
 
-    # Set the log level
-    if args.info == 0:
-        ou.setLogLevel(ou.LOG_WARN)
-    elif args.info == 1:
-        ou.setLogLevel(ou.LOG_INFO)
-    elif args.info == 2:
-        ou.setLogLevel(ou.LOG_DEBUG)
-    else:
-        ou.OMPL_ERROR("Invalid log-level integer.")
+    # Set the OMPL log level
+    ompl_utils.setLogLevel(args.info)
+    
+    # raise overflow / underflow warnings to errors 
+    np.seterr(all="raise")
 
     # Set the random seed
-    np.seterr(all="raise")
-    random.seed(args.seed)
-    np.random.seed(args.seed)
+    ompl_utils.setRandomSeed(args.seed)
 
     # Create the environment
     env = gym.make(args.env_id)

@@ -13,6 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
+from ompl_utils import angle_normalize
 
 try:
     from icecream import install  # noqa
@@ -42,31 +43,19 @@ except ImportError:
     from ompl import geometric as og
 
 
-global steps
-steps = 0
-
-def angle_normalize(x) -> float:
-    """"""
-    return ((x + np.pi) % (2 * np.pi)) - np.pi
-
 def isStateValid(si: ob.SpaceInformation, state: ob.State) -> bool:
     # perform collision checking or check if other constraints are satisfied
     l = 1
     th, th_dot = state[0], state[1]
     x, y = np.sin(th), np.cos(th)
-    
+
     # position valid
     pos_inbound = np.hypot(x, y) == l
 
-    return si.satisfiesBounds(state) and pos_inbound 
+    return si.satisfiesBounds(state) and pos_inbound
 
 
-def propagate(
-    start: ob.State,
-    control: oc.Control,
-    duration: float,
-    state: ob.State
-):
+def propagate(start: ob.State, control: oc.Control, duration: float, state: ob.State):
     g = 10.0
     m = 1.0
     l = 1.0
@@ -76,24 +65,27 @@ def propagate(
 
     th, th_dot = start[0], start[1]
     assert -pi <= th <= pi, f"State theta is out of bounds: {th}"
-    assert -max_speed <= th_dot <= max_speed, f"State theta_dot is out of bounds: {th_dot}" 
-    
+    assert (
+        -max_speed <= th_dot <= max_speed
+    ), f"State theta_dot is out of bounds: {th_dot}"
+
     u = control[0]
     assert -max_torque <= u <= max_torque, f"Control input u is out of bounds: {u}"
-    
+
     newthdot = th_dot + (3.0 * g / (2.0 * l) * np.sin(th) + 3.0 / (m * l ** 2) * u) * dt
     newthdot = np.clip(newthdot, -max_speed, max_speed)
-    assert -max_speed <= newthdot <= max_speed, f"New State theta_dot is out of bounds: {newthdot}"
-    
+    assert (
+        -max_speed <= newthdot <= max_speed
+    ), f"New State theta_dot is out of bounds: {newthdot}"
+
     newth = th + newthdot * dt
     newth = angle_normalize(newth)
     assert -pi <= newth <= pi, f"New State theta is out of bounds: {newth}"
-    
-    
+
     state[0] = newth
     state[1] = newthdot
     assert state[0] == newth and state[1] == newthdot
-    
+
     # print("here")
 
 
@@ -143,9 +135,9 @@ def plan(param: Dict[str, Any], runtime: float):
     si = ss.getSpaceInformation()
     planner = oc.RRT(si)
     # *Set the maximum length of a motion (Only planner from og has this method)
-    # planner.setRange(0.1)  
-    planner.setGoalBias(0.05) # Deafult is 0.05
-    
+    # planner.setRange(0.1)
+    planner.setGoalBias(0.05)  # Deafult is 0.05
+
     ss.setPlanner(planner)
     # (optionally) set propagation step size
     si.setPropagationStepSize(0.05)
@@ -207,8 +199,9 @@ def plot_xy_space(plan_path, render=False):
     else:
         plt.close()
 
+
 def recover_control(path):
-    
+
     g = 10.0
     m = 1.0
     l = 1.0
@@ -217,15 +210,16 @@ def recover_control(path):
     max_torque = 2.0
 
     control = []
-    
+
     for i in range(1, path.shape[0] - 1):
-        th, th_dot = path[i-1, 0], path[i-1, 1]
+        th, th_dot = path[i - 1, 0], path[i - 1, 1]
         newth, newthdot = path[i, 0], path[i, 1]
-        a = (newthdot - th_dot) / dt 
+        a = (newthdot - th_dot) / dt
         u = a - (3 * g / (2 * l) * np.sin(th)) / 3.0 * (m * l ** 2)
         assert -max_torque <= u <= max_torque, f"Control input u is out of bounds: {u}"
-        control.append(u)    
+        control.append(u)
     return control
+
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
@@ -307,16 +301,12 @@ if __name__ == "__main__":
     path, ss = plan(param, args.runtime)
     ic(path, path.shape)
 
-    
     si = ss.getSpaceInformation()
     pdf = ss.getProblemDefinition()
-    cspace = ss.getControlSpace () 
+    cspace = ss.getControlSpace()
     state_propagator = ss.getStatePropagator()
-    planner = ss.getPlanner ()
-    goal_bias = planner.getGoalBias ()
-    
-    
-    
+    planner = ss.getPlanner()
+    goal_bias = planner.getGoalBias()
 
     # Plot the path
     x_traj = np.sin(path[:, 0])
@@ -336,27 +326,33 @@ if __name__ == "__main__":
     plt.xlim(-1.1, 1.1)
     plt.ylim(-1.1, 1.1)
     (graph,) = plt.plot([], [], "o-")
-    plt.scatter(0, 0, c='r', label="start")
-    plt.scatter(0, 1, c='g', label='Goal')
+    plt.scatter(0, 0, c="r", label="start")
+    plt.scatter(0, 1, c="g", label="Goal")
     plt.legend()
 
     def animate(i):
         if i < plan_traj.shape[0] - 1:
             graph.set_data(plan_traj[:i, 0], plan_traj[:i, 1])
-            
-            this_x = [0, plan_traj[i+1, 0]]
-            this_y = [0, plan_traj[i+1, 1]]
-            graph.set_data(this_x, this_y)
-        return graph,
 
-    ani = FuncAnimation(fig, animate, repeat=False, frames=len(plan_traj)+1, interval=500,)
+            this_x = [0, plan_traj[i + 1, 0]]
+            this_y = [0, plan_traj[i + 1, 1]]
+            graph.set_data(this_x, this_y)
+        return (graph,)
+
+    ani = FuncAnimation(
+        fig,
+        animate,
+        repeat=False,
+        frames=len(plan_traj) + 1,
+        interval=500,
+    )
     # ani.save('rrt_pendulum.gif', writer='imagemagick', fps=3)
     plt.show()
 
     # Verify the path
     dstate = np.diff(path, axis=0)
-    
+
     # for dX in dstate:
-        # distance = np.linalg.norm(dX)
-        
+    # distance = np.linalg.norm(dX)
+
     recover_control(path)
