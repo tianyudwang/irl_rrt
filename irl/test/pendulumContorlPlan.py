@@ -117,7 +117,7 @@ def propagate(
 
 def init_rrt(param: Dict[str, Any]):
     # Construct the state space we are planning in
-    # *We are planning in [theta theta_dot]
+    # *We are planning in [theta, theta_dot]
 
     # Set the SO2 space which in [-max_speed, maxspeed].
     th_space = ob.SO2StateSpace()

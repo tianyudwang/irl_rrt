@@ -12,12 +12,16 @@ from PIL import Image
 import imageio
 
 import gym
+from gym.envs.robotics import rotations, robot_env, utils
+from gym.wrappers import FilterObservation, FlattenObservation
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import animation
 from matplotlib.animation import FuncAnimation
 
 import ompl_utils
+from irl.wrapper.fixGoal import FixGoal
 
 try:
     from icecream import install  # noqa
@@ -47,18 +51,14 @@ except ImportError:
     from ompl import geometric as og
 
 
-def init_planning(param: Dict[str, Any]):
-    # Construct the state space we are planning in
-    pass
-
-if __name__ == "__main__":
+def CLI():
     parser = argparse.ArgumentParser(description="Test the Hopper-v3 control planning")
     parser.add_argument(
         "--env_id",
         "-env",
         type=str,
         help="Envriment to interact with",
-        default="Hopper-v3",
+        default="FetchReach-v1",
     )
     parser.add_argument(
         "--planner",
@@ -81,55 +81,158 @@ if __name__ == "__main__":
         "--render", "-r", help="Render environment", action="store_true"
     )
     parser.add_argument("--render_video", "-rv", help="Save a gif", action="store_true")
-
     args = parser.parse_args()
+    return args
+
+def flatten_fixed_goal(env: gym.Env) -> gym.Env:
+    """
+    Filter and flatten observavtion from Dict to Box and set a fix goal state
+    Before:
+        obs:
+            {
+            'observation': array([...]]),  # (n,) depend on env 10 in FetchReach-v1
+            'achieved_goal': array([...]), # (3,) # xyz pos of achieved position
+            'desired_goal': array([...])  # (3,) # xyz pos of true goal position
+            }
+    After:
+        obs:{
+            "":
+            "obseravtion": [desired_goal, grip_pos, gripper_state, grip_velp, gripper_vel]
+                           [   (3,)       (3,)         (2,)        (3,)       (2,)   ]
+
+            grip_pos = self.sim.data.get_site_xpos("robot0:grip")
+            robot_qpos, robot_qvel = utils.robot_get_obs(self.sim)
+            gripper_state = robot_qpos[-2:]
+            grip_velp = self.sim.data.get_site_xvelp("robot0:grip") * dt
+            gripper_vel = robot_qvel[-2:] * dt
+        }
+    :param: env
+    :return flattend env where obs space in Box
+    """
+
+    # Filter the observation Dict
+    env = FilterObservation(env, ["observation", "desired_goal"])
+
+    # Convert Dict space to Box space
+    env = FlattenObservation(env)
+
+    # Fix the goal postion
+    env = FixGoal(env)  # custom wrapper might need to double check
+
+    # Sanity Check
+    obs = env.reset()
+    envGoal = env.goal.copy()
+
+    grip_pos = env.sim.data.get_site_xpos("robot0:grip")
+
+    robot_qpos, robot_qvel = utils.robot_get_obs(env.sim)
+    gripper_state = robot_qpos[-2:]
+
+    grip_velp = env.sim.data.get_site_xvelp("robot0:grip") * env.dt
+    gripper_vel = robot_qvel[-2:] * env.dt
+
+    verify_obs = np.concatenate(
+        [envGoal, grip_pos, gripper_state, grip_velp, gripper_vel], dtype=np.float32
+    )
+    assert np.all(obs == verify_obs)
+    return env
+
+def visualize(env, random=False):
+    while 1:
+        try:
+            if random:
+                env.render()
+                env.step(env.action_space.sample())
+                # env.step([0,-1,0,0])
+                
+            else:
+                for i in range(6,10):
+                    ic(i)
+                    for _ in range(100):
+                        env.render()
+                        env.sim.data.qpos[i] += 0.01
+                    env.reset()
+        except KeyboardInterrupt:
+            break
+
+def init_planning(param: Dict[str, Any]):
+    # Construct the state space we are planning in
+    # *We are planning in [theta, theta_dot]
+    # Create and set bounds of theta` space.
+    th_space = ob.RealVectorStateSpace(4)
+    th_bounds = ob.RealVectorBounds(4)
+    # th_bounds.low[0] =
+    # th_bounds.high[0] =
+    
+    # th_bounds.low[1] =
+    # th_bounds.high[1] =
+    
+    # th_bounds.low[2] =
+    # th_bounds.high[2] =
+    
+    # th_bounds.low[3] =
+    # th_bounds.high[3] =
+    # th_space.setBounds(th_bounds)
+    
+    # Create and set bounds of omega space.
+    omega_space = ob.RealVectorStateSpace(4)
+    w_bounds = ob.RealVectorBounds(4)
+    # w_bounds.low[0] =
+    # w_bounds.high[0] =
+    # w_bounds.low[1] =
+    # w_bounds.high[1] =
+    # w_bounds.low[2] =
+    # w_bounds.high[2] =
+    # w_bounds.low[3] =
+    # w_bounds.high[3] =
+    omega_space.setBounds(w_bounds)
+    
+     # Create compound space which allows the composition of state spaces.
+    space = ob.CompoundStateSpace()
+    space.addSubspace(th_space, 1.0)
+    space.addSubspace(omega_space, 1.0)
+    # Lock this state space. This means no further spaces can be added as components.
+    space.lock()
+
+
+def main():
+    pass
+
+if __name__ == "__main__":
+    
+    args = CLI()
     
     # Set the OMPL log level
     ompl_utils.setLogLevel(args.info)
-    
-    # raise overflow / underflow warnings to errors 
+
+    # Raise overflow / underflow warnings to errors
     np.seterr(all="raise")
 
     # Set the random seed
     ompl_utils.setRandomSeed(args.seed)
-    
+
     # Create the environment
     env = gym.make(args.env_id)
+    
+    # Flatten and fix goal
+    env = flatten_fixed_goal(env)
     env.seed(args.seed)
-    obs = env.reset()
-    ic(env.observation_space.shape)
-    ic(env.action_space.shape)
-    
-    
-    # _get_obs() ->  [self.sim.data.qpos.flat[1:], np.clip(self.sim.data.qvel.flat, -10, 10)]
-    ic(obs)
-    
-    # ============================================================================================
 
-    # ============================================================================================
-    # posafter, height, ang = self.sim.data.qpos[0:3]
-    ic(env.sim.data.qpos)
-    # * angle in degree
-    # qpos:  [pos(x), height,  angle,  angle, angle, angle]
-    # limit: [inf, [0, 0.7) +-0.2   +-100(deg),  +-100(deg),  +-100(deg)]
+    # Investigate env's obs space and act space
+    ic(env.observation_space)  # Box(-inf, inf, (13,), float32)
+    ic(env.action_space)       # Box(-1.0, 1.0, (4,), float32)
     
-    # qvel:  [+-10, +-10, +-10, +-10, +-10, +-10]
+    # This is same as calling env.sim.data.qpos and env.sim.data.qvel
+    qpos, qvel = utils.robot_get_obs(env.sim)
     
-    ic(env.sim.data.qvel)
-    ic(env.state_vector())
+    # useful q_pos and q_vel
+    # index:  [6, 7, 8, 9,] 
+    
+    
+    param = {
+        "start": np.concatenate([qpos, qvel])[6: 12],
+        "goal": env.goal  # x y z 
+    }
 
-    # Assuming torque
-    # -1.0 <= u <= 1.0 
-    for i in range(10_000):
-        try:
-            env.render()
-            
-            s = env.state_vector()
-            ic(s)
-            qpos = s[0:6]
-            qvel = s[6 :]
-            qpos[5] = pi+ i
-            env.set_state(qpos, qvel)
-        except KeyboardInterrupt:
-            
-            break
+    visualize(env, random=True)
+        
