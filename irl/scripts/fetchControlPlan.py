@@ -23,6 +23,8 @@ from matplotlib.animation import FuncAnimation
 import ompl_utils
 from irl.wrapper.fixGoal import FixGoal
 
+from irl.mujoco_ompl_py.mujoco_ompl_interface import *
+
 try:
     from icecream import install  # noqa
 

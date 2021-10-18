@@ -139,7 +139,7 @@ def init_rrt(param: Dict[str, Any]):
     # Create a control space
     cspace = oc.RealVectorControlSpace(space, 1)
 
-    # set the bounds for the control space
+    # Set the bounds for the control space
     cbounds = ob.RealVectorBounds(1)
     cbounds.setLow(-param["max_torque"])
     cbounds.setHigh(param["max_torque"])

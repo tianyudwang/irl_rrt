@@ -2,6 +2,7 @@ import unittest
 import gym
 from stable_baselines3 import SAC
 
+
 class Path:
     def __init__(self):
         self.states = []
@@ -15,23 +16,27 @@ class Path:
         self.rewards.append(reward)
         self.dones.append(done)
 
+
 def build_env(env_name):
     """
     Make env and add env wrappers
     """
-    if env_name == 'NavEnv-v0':
+    if env_name == "NavEnv-v0":
         import gym_nav
+
         env = gym.make(env_name)
     else:
-        raise ValueError('Environment {} not supported yet ...'.format(env_name))
+        raise ValueError("Environment {} not supported yet ...".format(env_name))
     return env
+
 
 def load_policy(model_name):
     model = SAC.load(model_name)
     return model
 
+
 def collect_paths(env, model, num_episodes=10, render=False):
-    
+
     obs = env.reset()
     paths, path = [], Path()
     episode = 0
@@ -50,13 +55,13 @@ def collect_paths(env, model, num_episodes=10, render=False):
             paths.append(path)
 
     return paths
-    
+
 
 class TestNavEnv(unittest.TestCase):
     def test(self):
-        env = build_env('NavEnv-v0')
+        env = build_env("NavEnv-v0")
 
-        model_name = ('../SAC_NavEnv-v0')
+        model_name = "../SAC_NavEnv-v0"
         model = load_policy(model_name)
 
         paths = collect_paths(env, model)
@@ -67,7 +72,5 @@ class TestNavEnv(unittest.TestCase):
             self.assertEqual(len(path.rewards), len(path.dones))
 
 
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

@@ -15,7 +15,6 @@ from gym.wrappers import FilterObservation, FlattenObservation
 
 from stable_baselines3 import HerReplayBuffer, SAC, PPO
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv
 
 from sb3_contrib import TQC
 from sb3_contrib.common.wrappers import TimeFeatureWrapper
@@ -88,21 +87,26 @@ def evaluate(model, env, num_episodes=10, seed=42, render=False, deterministic=T
     :param num_episode: (int) number of episodes to evaluate it
     :param norender: (bool) whether to render or not the environment
     """
-    eval_env = env
-    eval_env.seed(seed)
+    env.seed(seed)
     all_episode_rewards = []
+     
     for _ in tqdm(range(num_episodes), dynamic_ncols=True):
-        eval_env.reset()
+        env.reset()
         episode_rewards = 0
         done = False
-        obs = eval_env.reset()
+        obs = env.reset()
+        
         while not done:
             action, _ = model.predict(obs, deterministic)
-            obs, reward, done, info = eval_env.step(action)
+            obs, reward, done, info = env.step(action)
             episode_rewards += reward
+            is_success = info.get("is_success")
+            if is_success:
+                qpos_final = env.sim.get_state().qpos
+                qvel_final = env.sim.get_state().qvel
             if render:
                 try:
-                    eval_env.render()
+                    env.render()
                 except KeyboardInterrupt:
                     sys.exit(0)
         all_episode_rewards.append(episode_rewards)
@@ -117,6 +121,8 @@ def evaluate(model, env, num_episodes=10, seed=42, render=False, deterministic=T
     )
     plt.scatter(range(num_episodes), all_episode_rewards)
     plt.show(block=True)
+    return qpos_final, qvel_final
+
 
 
 if __name__ == "__main__":
@@ -211,5 +217,9 @@ if __name__ == "__main__":
         model = TQC.load(fname, env=env)
 
     # Evaluate the trained agent
-    evaluate(model, env, num_episodes=20, seed=args.seed, render=args.render, deterministic=True)
+    qpos_final, qvel_final = evaluate(model, env, num_episodes=20, seed=args.seed, render=args.render, deterministic=True)
+    ic(qpos_final, qvel_final)
+    
+    np.savez(path / 'scripts' / 'goal.npz', q_pos=qpos_final, q_vel=qvel_final)
+    
     
