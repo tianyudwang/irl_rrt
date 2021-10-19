@@ -8,10 +8,20 @@ from typing import Union
 from mujoco_py.cymj import PyMjModel, PyMjData
 from mujoco_py import MjSim
 
-from ompl import base as ob
-from ompl import control as oc
-
 from irl.mujoco_ompl_py.mujoco_wrapper import getJointInfo, getCtrlRange
+
+try:
+    from ompl import base as ob
+    from ompl import control as oc
+
+except ImportError:
+    from os.path import abspath, dirname, join
+
+    sys.path.insert(
+        0, join(dirname(dirname(dirname(abspath(__file__)))), "ompl", "py-bindings")
+    )
+    from ompl import base as ob
+    from ompl import control as oc
 
 try:
     from icecream import install  # noqa
