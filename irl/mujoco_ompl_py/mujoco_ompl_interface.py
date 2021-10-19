@@ -1,4 +1,7 @@
+import sys
+
 from copy import deepcopy
+from enum import Enum
 from math import ceil
 from typing import Union
 
@@ -10,15 +13,27 @@ from ompl import control as oc
 
 from irl.mujoco_ompl_py.mujoco_wrapper import getJointInfo, getCtrlRange
 
+try:
+    from icecream import install  # noqa
 
-# _mjtJoint (type)
-mjJNT_FREE = 0
-mjJNT_BALL = 1
-mjJNT_HINGE = 2
-mjJNT_SLIDE = 3
+    install()
+except ImportError:  # Graceful fallback if IceCream isn't installed.
+    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
 
 
-def make_1D_VecBounds(low: float = -50, high: float = 50) -> ob.RealVectorBounds:
+class mjtJoint(Enum):
+    """
+    _mjtJoint (type)
+    https://github.com/openai/mujoco-py/blob/master/mujoco_py/generated/const.py#L85-#L89
+    """
+
+    mjJNT_FREE = 0
+    mjJNT_BALL = 1
+    mjJNT_SLIDE = 2
+    mjJNT_HINGE = 3
+
+
+def make_1D_VecBounds(low: float, high: float) -> ob.RealVectorBounds:
     """
     Create a 1D RealVectorBounds object.
     Apparently OMPL needs bounds
@@ -31,6 +46,12 @@ def make_1D_VecBounds(low: float = -50, high: float = 50) -> ob.RealVectorBounds
     assert isinstance(low, (int, float))
     assert isinstance(high, (int, float))
     assert low <= high, f"low {low} must be less than or equal high {high}"
+    # if low == high:
+    #     # Conside this joint are fixed
+    #     # ompl don't allowed RealVectorBounds with low == high
+    #     # add a small value to high to foreced it to be a fixed state
+    #     low = 0.1
+    #     high += 1
     bounds = ob.RealVectorBounds(1)
     bounds.setLow(low)
     bounds.setHigh(high)
@@ -77,7 +98,7 @@ def readOmplStateKinematic(x, si: ob.SpaceInformation, state: ob.CompoundState):
 
 
 def makeCompoundStateSpace(
-    m: PyMjModel, include_velocity: bool, verbose: bool = False
+    m: PyMjModel, include_velocity: bool
 ) -> ob.CompoundStateSpace:
     """
     Create a compound state space from the MuJoCo model.
@@ -92,65 +113,74 @@ def makeCompoundStateSpace(
 
     # Iterate over all the joints in the model
     joints = getJointInfo(m)
-
+    vel_spaces = []
+    
     # Add a subspace matching the topology of each joint
     next_qpos = 0
-    for i, joint in enumerate(joints):
-        if verbose:
-            print(f"Reach Joint: {i}", end="\r")
+    for joint in joints:
         # ? what if range is not specified
-        bounds = make_1D_VecBounds(low=joint.range[0], high=joint.range[1])
-
+        bounds = ob.RealVectorBounds(1)
+        bounds.setLow(joint.range[0])
+        bounds.setHigh(joint.range[1])
+        # bounds = make_1D_VecBounds(low=joint.range[0], high=joint.range[1])
         # Check our assumptions are OK
         if joint.qposadr != next_qpos:
             raise ValueError(
                 f"Joint qposadr {joint.qposadr}: Joints are not in order of qposadr."
             )
         next_qpos += 1
-
+        # ! TODO: limited
         # Crate an appropriate subspace based on the joint type
-        # 0: free, 1: ball, 2: hinge, 3: slide
-        if joint.type == mjJNT_FREE:
+        # 0: free, 1: ball, 2: slide, 3: hinge
+        if joint.type == mjtJoint.mjJNT_FREE.value:
             joint_space = ob.SE3StateSpace()
-            vel_spaces = ob.RealVectorStateSpace(6)
+            vel_spaces.append(ob.RealVectorStateSpace(6))
             next_qpos += 6
 
-        elif joint.type == mjJNT_BALL:
+        elif joint.type == mjtJoint.mjJNT_BALL.value:
             joint_space = ob.SO3StateSpace()
             if joint.limited:
                 raise NotImplementedError(
                     "OMPL bounds on SO3 spaces are not implemented!"
                 )
 
-            # //vel_spaces = ob.RealVectorStateSpace(3)
-            # //next_qpos += 3
+            # // vel_spaces.append(ob.RealVectorStateSpace(3))
+            # // next_qpos += 3
             raise NotImplementedError("BALL joints are not yet supported!")
 
-        elif joint.type == mjJNT_HINGE:
+        elif joint.type == mjtJoint.mjJNT_HINGE.value:
             if joint.limited:
                 # * A hinge with limits is R^1
                 joint_space = ob.RealVectorStateSpace(1)
                 joint_space.setBounds(bounds)
             else:
                 joint_space = ob.SO2StateSpace()
-            vel_spaces = ob.RealVectorStateSpace(1)
+            vel_spaces.append(ob.RealVectorStateSpace(1))
 
-        elif joint.type == mjJNT_SLIDE:
+        elif joint.type == mjtJoint.mjJNT_SLIDE.value:
             joint_space = ob.RealVectorStateSpace(1)
             if joint.limited:
                 joint_space.setBounds(bounds)
-            vel_spaces = ob.RealVectorStateSpace(1)
+            vel_spaces.append(ob.RealVectorStateSpace(1))
+            
         else:
             raise ValueError(f"Unknown joint type {joint.type}")
 
         # Add the joint subspace to the compound state space
         space.addSubspace(joint_space, 1.0)
 
-        # Add the joint velocity subspace to the compound state space
-        if include_velocity:
-            vel_bounds = make_1D_VecBounds()
-            vel_spaces.setBounds(vel_bounds)
-            space.addSubspace(vel_spaces, 1.0)
+    if next_qpos != m.nq:
+        raise ValueError(
+            f"Total joint dimensions are not equal to nq.\nJoint dims: {next_qpos} vs nq: {m.nq}"
+        )
+
+    #! TODO: This is the issue!!
+    # Add the joint velocity subspace to the compound state space
+    if include_velocity:
+        for vel_space in vel_spaces:
+            vel_bounds = make_1D_VecBounds(low=-50, high=50)
+            # vel_space.setBounds(vel_bounds)
+            space.addSubspace(vel_space, 1.0)
     # Lock this state space.
     # This means no further spaces can be added as components.
     space.lock()
@@ -176,8 +206,8 @@ def makeRealVectorStateSpace(
     bounds = ob.RealVectorBounds(dim)
 
     for i, joint in enumerate(joints):
-        assert joint.type == mjJNT_SLIDE or (
-            joint.type == mjJNT_HINGE and joint.limited
+        assert joint.type == mjtJoint.mjJNT_SLIDE.value or (
+            joint.type == mjtJoint.mjJNT_HINGE.value and joint.limited
         )
         bounds.setLow(i, joint.range[0])
         bounds.setHigh(i, joint.range[1])
@@ -187,8 +217,8 @@ def makeRealVectorStateSpace(
 
 
 def createSpaceInformation(
-    m: PyMjModel, include_velocity: bool, verbose: bool = False
-) -> Union[ob.SpaceInformation, oc.SpaceInformation]:
+    m: PyMjModel, include_velocity: bool
+) -> Union[ob.SpaceInformation, oc.SpaceInformation, None]:
     """
     Create a space information from the MuJoCo model.
     :param m: MuJoCo model
@@ -197,14 +227,14 @@ def createSpaceInformation(
     :return:
     """
     if include_velocity:
-        space = makeCompoundStateSpace(m, True, verbose)
+        space = makeCompoundStateSpace(m, True)
 
         # Creat control space
         control_dim = m.nu
         assert control_dim >= 0, "Control dimension should not be negative."
         if control_dim == 0:
-            raise ValueError("No deafult control space. Need to specify manually.")
-
+            print("No deafult control space. Need to specify manually.")
+            return None
         c_space = oc.RealVectorControlSpace(space, control_dim)
         # Set the bounds for the control space
         c_bounds = ob.RealVectorBounds(control_dim)
@@ -317,6 +347,7 @@ def copyRealVectorOmplStateToMujoco(
     Copy data from state in RealVectorStateSpace to mjData.
     Copy position state to d->qpos
     Copy velocity state to d->qvel
+    *Note: This function assumes that all statesis are RealVectorStateSpace
 
     :param state:
     :param si:
@@ -503,6 +534,7 @@ class MujocoStatePropagator(oc.StatePropagator):
         sim: MjSim,
         include_velocity: bool,
     ):
+        super().__init__(si)
         self.si = si
         self.sim = sim
         self.include_velocity = include_velocity
@@ -546,6 +578,7 @@ class MujocoStateValidityChecker(ob.StateValidityChecker):
         sim: MjSim,
         include_velocity: bool,
     ):
+        super().__init__(si)
         self.si = si
         self.sim = sim
         self.include_velocity = include_velocity

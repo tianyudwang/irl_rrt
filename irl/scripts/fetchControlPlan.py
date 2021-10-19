@@ -4,22 +4,21 @@ import os
 import pathlib
 from typing import Any, Dict
 
-
 from PIL import Image
 import imageio
 
 import gym
-from gym.envs.robotics import rotations, robot_env, utils
+from gym.envs.robotics.utils import robot_get_obs
 from gym.wrappers import FilterObservation, FlattenObservation
 
-import mujoco_py
 
 import numpy as np
+
 import matplotlib.pyplot as plt
 from matplotlib import animation
 from matplotlib.animation import FuncAnimation
 
-import ompl_utils
+from irl.scripts import ompl_utils
 from irl.wrapper.fixGoal import FixGoal
 from irl.mujoco_ompl_py.mujoco_ompl_interface import *
 
@@ -29,7 +28,6 @@ try:
     install()
 except ImportError:  # Graceful fallback if IceCream isn't installed.
     ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
-
 
 try:
     from ompl import util as ou
@@ -59,6 +57,13 @@ def CLI():
         type=str,
         help="Envriment to interact with",
         default="FetchReach-v1",
+    )
+    parser.add_argument(
+        "-t",
+        "--runtime",
+        type=float,
+        default=5.0,
+        help="(Optional) Specify the runtime in seconds. Defaults to 1 and must be greater than 0.",
     )
     parser.add_argument(
         "--planner",
@@ -102,7 +107,7 @@ def flatten_fixed_goal(env: gym.Env) -> gym.Env:
                            [   (3,)       (3,)         (2,)        (3,)       (2,)   ]
 
             grip_pos = self.sim.data.get_site_xpos("robot0:grip")
-            robot_qpos, robot_qvel = utils.robot_get_obs(self.sim)
+            robot_qpos, robot_qvel = robot_get_obs(self.sim)
             gripper_state = robot_qpos[-2:]
             grip_velp = self.sim.data.get_site_xvelp("robot0:grip") * dt
             gripper_vel = robot_qvel[-2:] * dt
@@ -126,7 +131,7 @@ def flatten_fixed_goal(env: gym.Env) -> gym.Env:
 
     grip_pos = env.sim.data.get_site_xpos("robot0:grip")
 
-    robot_qpos, robot_qvel = utils.robot_get_obs(env.sim)
+    robot_qpos, robot_qvel = robot_get_obs(env.sim)
     gripper_state = robot_qpos[-2:]
 
     grip_velp = env.sim.data.get_site_xvelp("robot0:grip") * env.dt
@@ -140,15 +145,98 @@ def flatten_fixed_goal(env: gym.Env) -> gym.Env:
 
 
 def init_planning(env: gym.Env, param: Dict[str, Any]):
-    # Construct the state space we are planning in [theta, theta_dot]
-    si = createSpaceInformation(m=env.sim.model, include_velocity=True)
-    pass
+    # Construct the State Space we are planning in [theta, theta_dot]
+    space = makeCompoundStateSpace(
+        m=env.sim.model, 
+        include_velocity=param["include_velocity"],
+    )
+
+    # * Since there is no deafult contorl in XML files, we need to set them manually
+    control_dim = env.action_space.shape[0]  # 4
+    c_space = oc.RealVectorControlSpace(space, control_dim)
+    
+    # Set the bounds for the control space
+    c_bounds = ob.RealVectorBounds(control_dim)
+    c_bounds.setLow(-1.0)
+    c_bounds.setHigh(1.0)
+    c_space.setBounds(c_bounds)
+
+    # Define a simple setup class
+    ss = oc.SimpleSetup(c_space)
+    
+    # Recover the space information
+    si = ss.getSpaceInformation()
+      
+    # Set state validation check 
+    mj_validityChecker = MujocoStateValidityChecker(si, env.sim, include_velocity=param["include_velocity"])
+    ss.setStateValidityChecker(mj_validityChecker)
+    
+    # Set State Propagator
+    mj_propagator = MujocoStatePropagator(si, env.sim, include_velocity=param["include_velocity"])
+    ss.setStatePropagator(mj_propagator)
+    
+    # Set propagation step size 
+    si.setPropagationStepSize(env.sim.model.opt.timestep)
+    
+    # Create a start state and a goal state
+    start_state = ob.State(space)
+    goal_state = ob.State(space)
+    
+    for i in range(param["start"].shape[0]):
+        start_state[i] = param["start"][i]
+        goal_state[i] = param["goal"][i]
+    
+    # Set the start state and goal state
+    ss.setStartAndGoalStates(start_state, goal_state, 0.05)
+    
+    # Allocate and set the planner to the SimpleSetup
+    planner = ompl_utils.allocateControlPlanner(si, plannerType=param["plannerType"])
+    ss.setPlanner(planner)
+    
+    # Set optimization objective
+    ss.setOptimizationObjective(ob.PathLengthOptimizationObjective(si))
+    
+    # Some Sanity Check
+    assert si.getStateSpace().isCompound()
+    assert si.getStateSpace().isLocked()
+    assert si.getStateDimension() == len(param["start"])
+    for i in range(si.getStateDimension()):
+        assert si.getStateSpace().getSubspaceWeight (i) == 1.0
+        assert start_state[i] == param["start"][i]
+        assert goal_state[i] == param["goal"][i] 
+    return ss
+
+
+def plan(ss: ob.SpaceInformation, param: Dict[str, Any], runtime: float):
+    "Attempt to solve the problem" ""
+    solved = ss.solve(runtime)
+    controlPath = None
+    geometricPath = None
+    if solved:
+        # Print the path to screen
+        controlPath = ss.getSolutionPath()
+        controlPath.interpolate()
+        geometricPath = controlPath.asGeometric()
+        geometricPath.interpolate()
+
+        controlPath_np = np.fromstring(
+            geometricPath.printAsMatrix(), dtype=float, sep="\n"
+        ).reshape(-1, param["state_dim"])
+        geometricPath_np = np.fromstring(
+            geometricPath.printAsMatrix(), dtype=float, sep="\n"
+        ).reshape(-1, param["state_dim"])
+        # print("Found solution:\n%s" % path)
+    else:
+        print("No solution found")
+    return controlPath, controlPath_np, geometricPath, geometricPath_np
 
 
 if __name__ == "__main__":
 
     args = CLI()
 
+    ic(args.planner)    
+    
     # Current directory
     path = pathlib.Path(__file__).parent.resolve()
 
@@ -158,7 +246,7 @@ if __name__ == "__main__":
     # Raise overflow / underflow warnings to errors
     np.seterr(all="raise")
 
-    # Set the random seed
+    # Set the random seed (especially ou.RNG)
     ompl_utils.setRandomSeed(args.seed)
 
     # Create the environment
@@ -178,37 +266,42 @@ if __name__ == "__main__":
     # Load the goal state in Joint Space from expert demonstration
     goal_data = np.load(path / "goal.npz")
 
+    # Set the parameters of planning
     param = {
         "start": np.concatenate([q_pos_start, q_vel_start]),
         "goal": np.concatenate([goal_data["q_pos"], goal_data["q_vel"]]),
+        "include_velocity": True,
+        "plannerType": args.planner,
+        "state_dim": 30,
     }
-
-    sim = env.sim
-    m = sim.model
-    d = sim.data
-
-    # si = createSpaceInformation(m=env.sim.model, include_velocity=True, verbose=True)
-
-    # # Some Sanity Check
-    # assert si.getStateSpace().isCompound()
-    # assert si.getStateSpace().isLocked()
-    # assert si.getStateDimension() == len(param["start"])
-    # for i in range(si.getStateDimension()):
-    #     assert si.getStateSpace().getSubspaceWeight (i) == 1.0
-
-    space = makeCompoundStateSpace(m=env.sim.model, include_velocity=True, verbose=True)
-
-    # * Since there is no deafult contorl in XML files, we need to set them manually
-    control_dim = env.action_space.shape[0]  # 4
-    c_space = oc.RealVectorControlSpace(space, control_dim)
-    # Set the bounds for the control space
-    c_bounds = ob.RealVectorBounds(control_dim)
-    c_bounds.setLow(-1.0)
-    c_bounds.setHigh(1.0)
-    c_space.setBounds(c_bounds)
-
-    # Define a simple setup class
-    ss = oc.SimpleSetup(c_space)
-
-    # Recover the space information
-    si = ss.getSpaceInformation
+    
+    ss = init_planning(env, param)
+    
+    
+    si = ss.getSpaceInformation()
+    space = si.getStateSpace()
+    joints = getJointInfo(env.sim.model)
+    
+    from collections import OrderedDict
+    dic = OrderedDict()
+    for i in range(space.getSubspaceCount()):
+        subspace = space.getSubspace(i)
+        subspace_name = subspace.getName()
+        dic[subspace_name] = subspace
+    
+    for i, (k, v) in enumerate(dic.items()):
+        if isinstance(subspace, ob.RealVectorStateSpace):
+            ic(i+1)
+            ic(subspace.getBounds().low[0])
+            ic(subspace.getBounds().high[0])
+            
+    ic(dic)    
+    
+    
+    controlPath, controlPath_np, geometricPathm, geometricPath_np = plan(
+        ss, param, args.runtime
+    )
+    ic(geometricPath_np, geometricPath_np.shape)
+    
+    
+   

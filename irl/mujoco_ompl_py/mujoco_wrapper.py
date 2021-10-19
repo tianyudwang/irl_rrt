@@ -9,9 +9,10 @@ class JointInfo:
     A class to store information about a joint in a MuJoCo model.
     """
 
-    __slots__ = ["name", "type", "limited", "range", "qposadr", "dofadr"]
+    __slots__ = ["index", "name", "type", "limited", "range", "qposadr", "dofadr"]
 
     def __init__(self):
+        self.index: int
         self.name: str
         self.type: int
         self.limited: bool
@@ -21,12 +22,12 @@ class JointInfo:
 
     def __repr__(self):
         return (
-            f"Joint\n(name:{self.name},\n"
-            + f"type:{self.type},\n"
-            + f"limit:{self.limited},\n"
-            + f"range:{self.range},\n"
-            + f"qposadr:{self.qposadr},\n"
-            + f"dofadr:{self.dofadr}\n)"
+            f"Joint {self.index}: (name:{self.name[-4:]}, "
+            + f"type:{self.type}, "
+            + f"limit:{self.limited}, "
+            + f"range:{self.range}, "
+            + f"qposadr:{self.qposadr}, "
+            + f"dofadr:{self.dofadr})\n"
         )
 
 
@@ -52,9 +53,8 @@ def getJointInfo(m: PyMjModel):
     joints = []
     for i in range(m.njnt):
         joint = JointInfo()
-        joint.name = (
-            "".join(m.names.astype(str)) + " " + str(m.name_jntadr[i])
-        )  # ? what does this do?
+        joint.index = i
+        joint.name = "".join(m.names.astype(str)) + " " + str(m.name_jntadr[i])
         joint.type = m.jnt_type[i]
         joint.limited = bool(m.jnt_limited[i])
         joint.range[0] = np.asarray(m.jnt_range).flatten()[2 * i]
