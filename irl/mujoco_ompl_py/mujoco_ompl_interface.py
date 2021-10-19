@@ -10,7 +10,6 @@ from ompl import control as oc
 
 from irl.mujoco_ompl_py.mujoco_wrapper import getJointInfo, getCtrlRange
 
-from icecream import ic
 
 # _mjtJoint (type)
 mjJNT_FREE = 0
@@ -98,7 +97,7 @@ def makeCompoundStateSpace(
     next_qpos = 0
     for i, joint in enumerate(joints):
         if verbose:
-            print(f"Reach Joint: {i}", end='\r')
+            print(f"Reach Joint: {i}", end="\r")
         # ? what if range is not specified
         bounds = make_1D_VecBounds(low=joint.range[0], high=joint.range[1])
 
@@ -187,7 +186,9 @@ def makeRealVectorStateSpace(
     return space
 
 
-def createSpaceInformation(m: PyMjModel, include_velocity: bool, verbose: bool = False) -> Union[ob.SpaceInformation, oc.SpaceInformation]:
+def createSpaceInformation(
+    m: PyMjModel, include_velocity: bool, verbose: bool = False
+) -> Union[ob.SpaceInformation, oc.SpaceInformation]:
     """
     Create a space information from the MuJoCo model.
     :param m: MuJoCo model
@@ -203,7 +204,7 @@ def createSpaceInformation(m: PyMjModel, include_velocity: bool, verbose: bool =
         assert control_dim >= 0, "Control dimension should not be negative."
         if control_dim == 0:
             raise ValueError("No deafult control space. Need to specify manually.")
-        
+
         c_space = oc.RealVectorControlSpace(space, control_dim)
         # Set the bounds for the control space
         c_bounds = ob.RealVectorBounds(control_dim)
@@ -548,11 +549,12 @@ class MujocoStateValidityChecker(ob.StateValidityChecker):
         self.si = si
         self.sim = sim
         self.include_velocity = include_velocity
-    
+
     def isValid(self, state: ob.State) -> bool:
         """State Validation Check"""
         temp_sim = deepcopy(self.sim)
-        copyOmplStateToMujoco(state, self.si, temp_sim.model, temp_sim.data, self.include_velocity)
+        copyOmplStateToMujoco(
+            state, self.si, temp_sim.model, temp_sim.data, self.include_velocity
+        )
         temp_sim.step()
-        return temp_sim.data.ncon == 0 #  'No contacts should be detected here'
-        
+        return temp_sim.data.ncon == 0  #  'No contacts should be detected here'
