@@ -279,8 +279,8 @@ if __name__ == "__main__":
 
     # Set the OMPL log level
     ompl_utils.setLogLevel(args.info)
-    
-    # raise overflow / underflow warnings to errors 
+
+    # raise overflow / underflow warnings to errors
     np.seterr(all="raise")
 
     # Set the random seed

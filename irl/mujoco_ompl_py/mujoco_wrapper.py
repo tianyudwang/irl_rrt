@@ -69,8 +69,8 @@ def getCtrlRange(m: PyMjModel, i: int) -> StateRange:
     """
     Obtain the control range for a given joint in the Mujoco model.
     """
-    assert m.actuator_ctrllimited is not None
-    assert m.actuator_ctrlrange is not None
+    assert m.actuator_ctrllimited is not None, "actuator's ctrl limited not specified"
+    assert m.actuator_ctrlrange is not None, "actuator's ctrl range not specified"
     r = StateRange()
     r.limited = bool(m.actuator_ctrllimited[i])
     r.range[0] = np.asarray(m.ctrl_range).flatten()[2 * i]

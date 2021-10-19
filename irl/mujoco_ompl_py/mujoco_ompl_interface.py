@@ -1,4 +1,6 @@
+from copy import deepcopy
 from math import ceil
+from typing import Union
 
 from mujoco_py.cymj import PyMjModel, PyMjData
 from mujoco_py import MjSim
@@ -7,6 +9,8 @@ from ompl import base as ob
 from ompl import control as oc
 
 from irl.mujoco_ompl_py.mujoco_wrapper import getJointInfo, getCtrlRange
+
+from icecream import ic
 
 # _mjtJoint (type)
 mjJNT_FREE = 0
@@ -27,7 +31,7 @@ def make_1D_VecBounds(low: float = -50, high: float = 50) -> ob.RealVectorBounds
     """
     assert isinstance(low, (int, float))
     assert isinstance(high, (int, float))
-    assert low < high
+    assert low <= high, f"low {low} must be less than or equal high {high}"
     bounds = ob.RealVectorBounds(1)
     bounds.setLow(low)
     bounds.setHigh(high)
@@ -74,10 +78,11 @@ def readOmplStateKinematic(x, si: ob.SpaceInformation, state: ob.CompoundState):
 
 
 def makeCompoundStateSpace(
-    m: PyMjModel, include_velocity: bool
+    m: PyMjModel, include_velocity: bool, verbose: bool = False
 ) -> ob.CompoundStateSpace:
     """
     Create a compound state space from the MuJoCo model.
+    Automatically figure out the State Space Type.
     (optionally including velocity)
     :param m: MuJoCo model
     :param include_velocity:
@@ -91,7 +96,9 @@ def makeCompoundStateSpace(
 
     # Add a subspace matching the topology of each joint
     next_qpos = 0
-    for joint in joints:
+    for i, joint in enumerate(joints):
+        if verbose:
+            print(f"Reach Joint: {i}", end='\r')
         # ? what if range is not specified
         bounds = make_1D_VecBounds(low=joint.range[0], high=joint.range[1])
 
@@ -145,7 +152,6 @@ def makeCompoundStateSpace(
             vel_bounds = make_1D_VecBounds()
             vel_spaces.setBounds(vel_bounds)
             space.addSubspace(vel_spaces, 1.0)
-
     # Lock this state space.
     # This means no further spaces can be added as components.
     space.lock()
@@ -181,7 +187,7 @@ def makeRealVectorStateSpace(
     return space
 
 
-def createSpaceInformation(m: PyMjModel, include_velocity: bool) -> ob.SpaceInformation:
+def createSpaceInformation(m: PyMjModel, include_velocity: bool, verbose: bool = False) -> Union[ob.SpaceInformation, oc.SpaceInformation]:
     """
     Create a space information from the MuJoCo model.
     :param m: MuJoCo model
@@ -190,14 +196,17 @@ def createSpaceInformation(m: PyMjModel, include_velocity: bool) -> ob.SpaceInfo
     :return:
     """
     if include_velocity:
-        space = makeCompoundStateSpace(m, True)
+        space = makeCompoundStateSpace(m, True, verbose)
 
         # Creat control space
         control_dim = m.nu
+        assert control_dim >= 0, "Control dimension should not be negative."
+        if control_dim == 0:
+            raise ValueError("No deafult control space. Need to specify manually.")
+        
         c_space = oc.RealVectorControlSpace(space, control_dim)
         # Set the bounds for the control space
         c_bounds = ob.RealVectorBounds(control_dim)
-        # General bounds for the control space
         c_bounds.setLow(-1.0)
         c_bounds.setHigh(1.0)
 
@@ -211,7 +220,7 @@ def createSpaceInformation(m: PyMjModel, include_velocity: bool) -> ob.SpaceInfo
 
         # Combine into Space Information
         si = oc.SpaceInformation(space, c_space)
-        si.setPropagationStepSize(m.opt.timestamp)
+        si.setPropagationStepSize(m.opt.timestep)
     else:
         space = makeCompoundStateSpace(m, False)
         si = ob.SpaceInformation(space)
@@ -344,7 +353,7 @@ def copyOmplStateToMujoco(
     if si.getStateSpace().isCompound():
         copyCompoundOmplStateToMujoco(state, si, m, d, include_velocity)
     elif si.getStateSpace().getType() == ob.STATE_SPACE_REAL_VECTOR:
-        copyRealVectorOmplStateToMujoco()
+        copyRealVectorOmplStateToMujoco(state, si, m, d, include_velocity)
     else:
         raise NotImplementedError(
             "Only support `CompoundStateSpace` and `RealVectorStateSpace` for now"
@@ -527,3 +536,23 @@ class MujocoStatePropagator(oc.StatePropagator):
 
     def canSteer(self) -> bool:
         return False
+
+
+class MujocoStateValidityChecker(ob.StateValidityChecker):
+    def __init__(
+        self,
+        si: oc.SpaceInformation,
+        sim: MjSim,
+        include_velocity: bool,
+    ):
+        self.si = si
+        self.sim = sim
+        self.include_velocity = include_velocity
+    
+    def isValid(self, state: ob.State) -> bool:
+        """State Validation Check"""
+        temp_sim = deepcopy(self.sim)
+        copyOmplStateToMujoco(state, self.si, temp_sim.model, temp_sim.data, self.include_velocity)
+        temp_sim.step()
+        return temp_sim.data.ncon == 0 #  'No contacts should be detected here'
+        

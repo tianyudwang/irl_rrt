@@ -9,6 +9,7 @@ from tqdm import tqdm
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+
 matplotlib.use("TkAgg")
 import gym
 from gym.wrappers import FilterObservation, FlattenObservation
@@ -31,9 +32,7 @@ except ImportError:  # Graceful fallback if IceCream isn't installed.
 
 def CLI():
     p = argparse.ArgumentParser()
-    p.add_argument(
-        "--env_id", type=str, help="environment ID", default="FetchReach-v1" 
-    )
+    p.add_argument("--env_id", type=str, help="environment ID", default="FetchReach-v1")
     p.add_argument(
         "--reward_type",
         "-rt",
@@ -42,17 +41,9 @@ def CLI():
         default="dense",
         help="Reward type 'sparse' or 'dense' used typically in non-HER training",
     )
-    p.add_argument(
-        "--fix",
-        action="store_true",
-        help="Fix the goal positon"
-    )
-    p.add_argument(
-        "--train",
-        '-t',
-        action="store_true"
-    )
-    
+    p.add_argument("--fix", action="store_true", help="Fix the goal positon")
+    p.add_argument("--train", "-t", action="store_true")
+
     p.add_argument(
         "--num_steps",
         "-n",
@@ -60,8 +51,13 @@ def CLI():
         help="number of timesteps",
         default=65_000,
     )
-    p.add_argument("--device", type=str, choices=['auto', 'cpu', 'cuda'], default='auto',
-                   help="device to be run on")
+    p.add_argument(
+        "--device",
+        type=str,
+        choices=["auto", "cpu", "cuda"],
+        default="auto",
+        help="device to be run on",
+    )
     p.add_argument("--seed", help="Random Seed", default=42, type=int)
     p.add_argument(
         "--verbose",
@@ -74,9 +70,10 @@ def CLI():
         action="store_true",
         help="Render the environment (useful for tests)",
     )
-    
+
     args = p.parse_args()
     return args
+
 
 def evaluate(model, env, num_episodes=10, seed=42, render=False, deterministic=True):
     """
@@ -89,13 +86,13 @@ def evaluate(model, env, num_episodes=10, seed=42, render=False, deterministic=T
     """
     env.seed(seed)
     all_episode_rewards = []
-     
+
     for _ in tqdm(range(num_episodes), dynamic_ncols=True):
         env.reset()
         episode_rewards = 0
         done = False
         obs = env.reset()
-        
+
         while not done:
             action, _ = model.predict(obs, deterministic)
             obs, reward, done, info = env.step(action)
@@ -111,7 +108,7 @@ def evaluate(model, env, num_episodes=10, seed=42, render=False, deterministic=T
                     sys.exit(0)
         all_episode_rewards.append(episode_rewards)
     # eval_env.close()
-    
+
     mean_episode_reward = np.mean(all_episode_rewards)
     std_episode_reward = np.std(all_episode_rewards)
     print(f"-" * 50)
@@ -124,29 +121,28 @@ def evaluate(model, env, num_episodes=10, seed=42, render=False, deterministic=T
     return qpos_final, qvel_final
 
 
-
 if __name__ == "__main__":
-    
+
     args = CLI()
 
     # parant directory
     path = pathlib.Path(__file__).parent.parent
-    
+
     # Create save directory and log file
     save_dir = path / "rl-trained-agents"
     fname = str(save_dir / f"{args.env_id}_{args.reward_type}_{args.num_steps}")
-    
+
     if args.fix:
-        fname += '_fixGoal'
+        fname += "_fixGoal"
     ic(fname)
-    
+
     if not os.path.exists(save_dir):
         os.makedirs(save_dir, exist_ok=True)
-    
+
     # Set seed
     random.seed(args.seed)
     np.random.seed(args.seed)
-    
+
     # Create the environment
     env = gym.make(args.env_id)
     env.seed(args.seed)
@@ -154,10 +150,12 @@ if __name__ == "__main__":
     env.reward_type = args.reward_type
     if args.fix:
         # Convert Dict space to Box space
-        env = FlattenObservation(FilterObservation(env, ['observation', 'desired_goal']))
+        env = FlattenObservation(
+            FilterObservation(env, ["observation", "desired_goal"])
+        )
         # Fix the goal postion
         env = FixGoal(env)
-        policy_cls = 'MlpPolicy'
+        policy_cls = "MlpPolicy"
         replay_buffer_class = None
         replay_buffer_kwargs = None
     else:
@@ -165,22 +163,22 @@ if __name__ == "__main__":
         replay_buffer_class = HerReplayBuffer
         replay_buffer_kwargs = dict(
             n_sampled_goal=4,
-            goal_selection_strategy='future',
+            goal_selection_strategy="future",
             online_sampling=True,
         )
-    
+
     # SB3 utility wrapper
     for wrapper in [Monitor, TimeFeatureWrapper]:
         env = wrapper(env)
     ic(env)
-        
+
     # Training a agent
     if args.train:
         # Create the model
-        model_class = TQC    
+        model_class = TQC
         model = model_class(
             policy_cls,
-            env, 
+            env,
             learning_rate=7e-4,
             buffer_size=int(1e6),
             learning_starts=5_000,
@@ -194,22 +192,22 @@ if __name__ == "__main__":
             # replay_buffer_class=replay_buffer_class,
             # replay_buffer_kwargs=replay_buffer_kwargs,
             optimize_memory_usage=False,
-            ent_coef='auto',
+            ent_coef="auto",
             target_update_interval=1,
-            target_entropy='auto',
+            target_entropy="auto",
             top_quantiles_to_drop_per_net=2,
             use_sde=False,
-            sde_sample_freq=- 1,
+            sde_sample_freq=-1,
             use_sde_at_warmup=False,
             tensorboard_log=None,
             create_eval_env=False,
             policy_kwargs=None,
-            verbose=args.verbose, 
+            verbose=args.verbose,
             seed=args.seed,
             device=args.device,
         )
-        
-        model.learn(total_timesteps = int(args.num_steps))
+
+        model.learn(total_timesteps=int(args.num_steps))
         model.save(fname)
     else:
         # Because it needs access to `env.compute_reward()`
@@ -217,9 +215,14 @@ if __name__ == "__main__":
         model = TQC.load(fname, env=env)
 
     # Evaluate the trained agent
-    qpos_final, qvel_final = evaluate(model, env, num_episodes=20, seed=args.seed, render=args.render, deterministic=True)
+    qpos_final, qvel_final = evaluate(
+        model,
+        env,
+        num_episodes=20,
+        seed=args.seed,
+        render=args.render,
+        deterministic=True,
+    )
     ic(qpos_final, qvel_final)
-    
-    np.savez(path / 'scripts' / 'goal.npz', q_pos=qpos_final, q_vel=qvel_final)
-    
-    
+
+    np.savez(path / "scripts" / "goal.npz", q_pos=qpos_final, q_vel=qvel_final)

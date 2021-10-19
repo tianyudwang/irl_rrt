@@ -72,7 +72,9 @@ def allocateControlPlanner(si: ob.SpaceInformation, plannerType: str) -> ob.Plan
     elif plannerType.lower() == "sst":
         return oc.SST(si)
     else:
-        ou.OMPL_ERROR(f"Planner-type {plannerType} is not implemented in oc allocation function.")
+        ou.OMPL_ERROR(
+            f"Planner-type {plannerType} is not implemented in oc allocation function."
+        )
 
 
 def getPathLengthObjective(si: ob.SpaceInformation):

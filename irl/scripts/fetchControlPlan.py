@@ -1,12 +1,9 @@
 import argparse
 import sys
 import os
-import time
+import pathlib
 from typing import Any, Dict
-import random
 
-from math import pi
-from functools import partial
 
 from PIL import Image
 import imageio
@@ -15,6 +12,8 @@ import gym
 from gym.envs.robotics import rotations, robot_env, utils
 from gym.wrappers import FilterObservation, FlattenObservation
 
+import mujoco_py
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import animation
@@ -22,7 +21,6 @@ from matplotlib.animation import FuncAnimation
 
 import ompl_utils
 from irl.wrapper.fixGoal import FixGoal
-
 from irl.mujoco_ompl_py.mujoco_ompl_interface import *
 
 try:
@@ -86,6 +84,7 @@ def CLI():
     args = parser.parse_args()
     return args
 
+
 def flatten_fixed_goal(env: gym.Env) -> gym.Env:
     """
     Filter and flatten observavtion from Dict to Box and set a fix goal state
@@ -139,71 +138,20 @@ def flatten_fixed_goal(env: gym.Env) -> gym.Env:
     assert np.all(obs == verify_obs)
     return env
 
-def visualize(env, random=False):
-    while 1:
-        try:
-            if random:
-                env.render()
-                env.step(env.action_space.sample())
-                # env.step([0,-1,0,0])
-                
-            else:
-                for i in range(6,10):
-                    ic(i)
-                    for _ in range(100):
-                        env.render()
-                        env.sim.data.qpos[i] += 0.01
-                    env.reset()
-        except KeyboardInterrupt:
-            break
 
-def init_planning(param: Dict[str, Any]):
-    # Construct the state space we are planning in
-    # *We are planning in [theta, theta_dot]
-    # Create and set bounds of theta` space.
-    th_space = ob.RealVectorStateSpace(4)
-    th_bounds = ob.RealVectorBounds(4)
-    # th_bounds.low[0] =
-    # th_bounds.high[0] =
-    
-    # th_bounds.low[1] =
-    # th_bounds.high[1] =
-    
-    # th_bounds.low[2] =
-    # th_bounds.high[2] =
-    
-    # th_bounds.low[3] =
-    # th_bounds.high[3] =
-    # th_space.setBounds(th_bounds)
-    
-    # Create and set bounds of omega space.
-    omega_space = ob.RealVectorStateSpace(4)
-    w_bounds = ob.RealVectorBounds(4)
-    # w_bounds.low[0] =
-    # w_bounds.high[0] =
-    # w_bounds.low[1] =
-    # w_bounds.high[1] =
-    # w_bounds.low[2] =
-    # w_bounds.high[2] =
-    # w_bounds.low[3] =
-    # w_bounds.high[3] =
-    omega_space.setBounds(w_bounds)
-    
-     # Create compound space which allows the composition of state spaces.
-    space = ob.CompoundStateSpace()
-    space.addSubspace(th_space, 1.0)
-    space.addSubspace(omega_space, 1.0)
-    # Lock this state space. This means no further spaces can be added as components.
-    space.lock()
-
-
-def main():
+def init_planning(env: gym.Env, param: Dict[str, Any]):
+    # Construct the state space we are planning in [theta, theta_dot]
+    si = createSpaceInformation(m=env.sim.model, include_velocity=True)
     pass
 
+
 if __name__ == "__main__":
-    
+
     args = CLI()
-    
+
+    # Current directory
+    path = pathlib.Path(__file__).parent.resolve()
+
     # Set the OMPL log level
     ompl_utils.setLogLevel(args.info)
 
@@ -215,26 +163,52 @@ if __name__ == "__main__":
 
     # Create the environment
     env = gym.make(args.env_id)
-    
+
     # Flatten and fix goal
     env = flatten_fixed_goal(env)
     env.seed(args.seed)
 
-    # Investigate env's obs space and act space
-    ic(env.observation_space)  # Box(-inf, inf, (13,), float32)
-    ic(env.action_space)       # Box(-1.0, 1.0, (4,), float32)
-    
-    # This is same as calling env.sim.data.qpos and env.sim.data.qvel
-    qpos, qvel = utils.robot_get_obs(env.sim)
-    
-    # useful q_pos and q_vel
-    # index:  [6, 7, 8, 9,] 
-    
-    
+    # Initialize the environment
+    env.reset()
+
+    # Obtain the start state in Joint Space
+    q_pos_start = env.sim.get_state().qpos
+    q_vel_start = env.sim.get_state().qvel
+
+    # Load the goal state in Joint Space from expert demonstration
+    goal_data = np.load(path / "goal.npz")
+
     param = {
-        "start": np.concatenate([qpos, qvel])[6: 12],
-        "goal": env.goal  # x y z 
+        "start": np.concatenate([q_pos_start, q_vel_start]),
+        "goal": np.concatenate([goal_data["q_pos"], goal_data["q_vel"]]),
     }
 
-    visualize(env, random=True)
-        
+    sim = env.sim
+    m = sim.model
+    d = sim.data
+
+    # si = createSpaceInformation(m=env.sim.model, include_velocity=True, verbose=True)
+
+    # # Some Sanity Check
+    # assert si.getStateSpace().isCompound()
+    # assert si.getStateSpace().isLocked()
+    # assert si.getStateDimension() == len(param["start"])
+    # for i in range(si.getStateDimension()):
+    #     assert si.getStateSpace().getSubspaceWeight (i) == 1.0
+
+    space = makeCompoundStateSpace(m=env.sim.model, include_velocity=True, verbose=True)
+
+    # * Since there is no deafult contorl in XML files, we need to set them manually
+    control_dim = env.action_space.shape[0]  # 4
+    c_space = oc.RealVectorControlSpace(space, control_dim)
+    # Set the bounds for the control space
+    c_bounds = ob.RealVectorBounds(control_dim)
+    c_bounds.setLow(-1.0)
+    c_bounds.setHigh(1.0)
+    c_space.setBounds(c_bounds)
+
+    # Define a simple setup class
+    ss = oc.SimpleSetup(c_space)
+
+    # Recover the space information
+    si = ss.getSpaceInformation
