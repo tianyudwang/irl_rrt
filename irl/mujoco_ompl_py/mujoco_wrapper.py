@@ -4,13 +4,19 @@ import numpy as np
 from mujoco_py.cymj import PyMjModel
 
 
+mjJNT = {
+    0: "FREE" ,
+    1: "BALL" ,
+    2: "SLIDE",
+    3: "HINGE",
+}
+
 class JointInfo:
     """
     A class to store information about a joint in a MuJoCo model.
     """
-
-    __slots__ = ["index", "name", "type", "limited", "range", "qposadr", "dofadr"]
-
+    __slots__ = ["index", "name", "type", "limited", "range", "qposadr", "dofadr", "mjJNT"] 
+    
     def __init__(self):
         self.index: int
         self.name: str
@@ -23,7 +29,7 @@ class JointInfo:
     def __repr__(self):
         return (
             f"Joint {self.index}: (name:{self.name[-4:]}, "
-            + f"type:{self.type}, "
+            + f"type:{self.type} ({mjJNT[self.type]}), "
             + f"limit:{self.limited}, "
             + f"range:{self.range}, "
             + f"qposadr:{self.qposadr}, "

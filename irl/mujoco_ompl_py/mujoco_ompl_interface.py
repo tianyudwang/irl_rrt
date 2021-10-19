@@ -55,12 +55,11 @@ def make_1D_VecBounds(low: float, high: float) -> ob.RealVectorBounds:
     assert isinstance(low, (int, float))
     assert isinstance(high, (int, float))
     assert low <= high, f"low {low} must be less than or equal high {high}"
-    # if low == high:
-    #     # Conside this joint are fixed
-    #     # ompl don't allowed RealVectorBounds with low == high
-    #     # add a small value to high to foreced it to be a fixed state
-    #     low = 0.1
-    #     high += 1
+    if low == high:
+        # Conside this joint are fixed
+        # ompl don't allowed RealVectorBounds with low == high
+        # add a small value to high to foreced it to be a fixed state
+        high += 1e-4
     bounds = ob.RealVectorBounds(1)
     bounds.setLow(low)
     bounds.setHigh(high)
@@ -107,7 +106,7 @@ def readOmplStateKinematic(x, si: ob.SpaceInformation, state: ob.CompoundState):
 
 
 def makeCompoundStateSpace(
-    m: PyMjModel, include_velocity: bool
+    m: PyMjModel, include_velocity: bool, lock_space: bool = False,
 ) -> ob.CompoundStateSpace:
     """
     Create a compound state space from the MuJoCo model.
@@ -127,11 +126,8 @@ def makeCompoundStateSpace(
     # Add a subspace matching the topology of each joint
     next_qpos = 0
     for joint in joints:
-        # ? what if range is not specified
-        bounds = ob.RealVectorBounds(1)
-        bounds.setLow(joint.range[0])
-        bounds.setHigh(joint.range[1])
-        # bounds = make_1D_VecBounds(low=joint.range[0], high=joint.range[1])
+        assert joint.range is not None, "Joint range is not specified (weird)"
+        bounds = make_1D_VecBounds(low=joint.range[0], high=joint.range[1])
         # Check our assumptions are OK
         if joint.qposadr != next_qpos:
             raise ValueError(
@@ -148,13 +144,6 @@ def makeCompoundStateSpace(
 
         elif joint.type == mjtJoint.mjJNT_BALL.value:
             joint_space = ob.SO3StateSpace()
-            if joint.limited:
-                raise NotImplementedError(
-                    "OMPL bounds on SO3 spaces are not implemented!"
-                )
-
-            # // vel_spaces.append(ob.RealVectorStateSpace(3))
-            # // next_qpos += 3
             raise NotImplementedError("BALL joints are not yet supported!")
 
         elif joint.type == mjtJoint.mjJNT_HINGE.value:
@@ -183,16 +172,15 @@ def makeCompoundStateSpace(
             f"Total joint dimensions are not equal to nq.\nJoint dims: {next_qpos} vs nq: {m.nq}"
         )
 
-    #! TODO: This is the issue!!
     # Add the joint velocity subspace to the compound state space
     if include_velocity:
         for vel_space in vel_spaces:
-            vel_bounds = make_1D_VecBounds(low=-50, high=50)
-            # vel_space.setBounds(vel_bounds)
+            vel_bounds = make_1D_VecBounds(low=-10, high=10)
+            vel_space.setBounds(vel_bounds)
             space.addSubspace(vel_space, 1.0)
-    # Lock this state space.
-    # This means no further spaces can be added as components.
-    space.lock()
+    # Lock this state space. This means no further spaces can be added as components.
+    if lock_space:
+        space.lock()
     return space
 
 
@@ -562,9 +550,9 @@ class MujocoStatePropagator(oc.StatePropagator):
         # Copy control
         copyOmplControlToMujoco(control, self.si, self.sim.model, self.sim.data)
 
+        # mj->sim_duration(duration)
         self.sim_duration(duration)
 
-        # mj->sim_duration(duration)
         copyMujocoStateToOmpl(self.sim.model, self.sim.data, self.si_, result)
 
     def sim_duration(self, duration: float) -> None:
@@ -599,4 +587,6 @@ class MujocoStateValidityChecker(ob.StateValidityChecker):
             state, self.si, temp_sim.model, temp_sim.data, self.include_velocity
         )
         temp_sim.step()
-        return temp_sim.data.ncon == 0  #  'No contacts should be detected here'
+        print("Here Validdddddddddddddddddddddddddddddddd")
+        # return temp_sim.data.ncon == 0  #  'No contacts should be detected here'
+        return True

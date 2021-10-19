@@ -22,6 +22,7 @@ from irl.scripts import ompl_utils
 from irl.wrapper.fixGoal import FixGoal
 from irl.mujoco_ompl_py.mujoco_ompl_interface import *
 
+from icecream import ic
 try:
     from icecream import install  # noqa
 
@@ -149,6 +150,7 @@ def init_planning(env: gym.Env, param: Dict[str, Any]):
     space = makeCompoundStateSpace(
         m=env.sim.model, 
         include_velocity=param["include_velocity"],
+        lock_space=param["lock_space"],
     )
 
     # * Since there is no deafult contorl in XML files, we need to set them manually
@@ -198,7 +200,6 @@ def init_planning(env: gym.Env, param: Dict[str, Any]):
     
     # Some Sanity Check
     assert si.getStateSpace().isCompound()
-    assert si.getStateSpace().isLocked()
     assert si.getStateDimension() == len(param["start"])
     for i in range(si.getStateDimension()):
         assert si.getStateSpace().getSubspaceWeight (i) == 1.0
@@ -211,7 +212,9 @@ def plan(ss: ob.SpaceInformation, param: Dict[str, Any], runtime: float):
     "Attempt to solve the problem" ""
     solved = ss.solve(runtime)
     controlPath = None
+    controlPath_np = None
     geometricPath = None
+    geometricPath_np = None
     if solved:
         # Print the path to screen
         controlPath = ss.getSolutionPath()
@@ -273,8 +276,12 @@ if __name__ == "__main__":
         "include_velocity": True,
         "plannerType": args.planner,
         "state_dim": 30,
+        "lock_space": False
     }
     
+    ic(param['start'])
+    
+    # Setup
     ss = init_planning(env, param)
     
     
@@ -288,20 +295,14 @@ if __name__ == "__main__":
         subspace = space.getSubspace(i)
         subspace_name = subspace.getName()
         dic[subspace_name] = subspace
-    
-    for i, (k, v) in enumerate(dic.items()):
-        if isinstance(subspace, ob.RealVectorStateSpace):
-            ic(i+1)
-            ic(subspace.getBounds().low[0])
-            ic(subspace.getBounds().high[0])
-            
-    ic(dic)    
+        if isinstance(subspace, ob.RealVectorStateSpace) and i < 15: #* Not include the velocity
+            ic(i, subspace_name, subspace.getBounds().low[0], subspace.getBounds().high[0])
+            pass
     
     
-    controlPath, controlPath_np, geometricPathm, geometricPath_np = plan(
+    controlPath, controlPath_np, geometricPath, geometricPath_np = plan(
         ss, param, args.runtime
     )
-    ic(geometricPath_np, geometricPath_np.shape)
     
     
    
