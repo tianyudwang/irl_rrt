@@ -7,12 +7,31 @@ import gym
 import numpy as np
 import mujoco_py
 
-from ompl import util as ou
-from ompl import base as ob
-from ompl import control as oc
-from ompl import geometric as og
+try:
+    from ompl import util as ou
+    from ompl import base as ob
+    from ompl import control as oc
+    from ompl import geometric as og
+except ImportError:
+    # if the ompl module is not in the PYTHONPATH assume it is installed in a
+    # subdirectory of the parent directory called "py-bindings."
+    from os.path import abspath, dirname, join
+    import sys
 
-from icecream import ic
+    sys.path.insert(
+        0, join(dirname(dirname(dirname(abspath(__file__)))), "ompl", "py-bindings")
+    )
+    from ompl import util as ou
+    from ompl import base as ob
+    from ompl import control as oc
+    from ompl import geometric as og
+
+try:
+    from icecream import install  # noqa
+
+    install()
+except ImportError:  # Graceful fallback if IceCream isn't installed.
+    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noq
 
 from irl.mujoco_ompl_py.mujoco_wrapper import *
 from irl.mujoco_ompl_py.mujoco_ompl_interface import *

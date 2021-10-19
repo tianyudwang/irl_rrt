@@ -40,7 +40,7 @@ except ImportError:
     import sys
 
     sys.path.insert(
-        0, join(dirname(dirname(dirname(abspath(__file__)))), "ompl/py-bindings")
+        0, join(dirname(dirname(dirname(abspath(__file__)))), "ompl", "py-bindings")
     )
     from ompl import util as ou
     from ompl import base as ob
@@ -287,6 +287,8 @@ if __name__ == "__main__":
     ompl_utils.setRandomSeed(args.seed)
 
     # Create the environment
+    #* NOTE: This is the environment is depreciate in the newest gym. 
+    #* Algorithms may not be compatible with new version environment ['Pendulum-v1'].
     env = gym.make(args.env_id)
     env.seed(args.seed)
     obs = env.reset()

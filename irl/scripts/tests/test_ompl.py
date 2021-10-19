@@ -10,7 +10,7 @@ except ImportError:
     from os.path import abspath, dirname, join
 
     sys.path.insert(
-        0, join(dirname(dirname(dirname(dirname(abspath(__file__))))), "py-bindings")
+        0, join(dirname(dirname(dirname(dirname(abspath(__file__))))), "ompl", "py-bindings")
     )
     from ompl import util as ou
     from ompl import base as ob
