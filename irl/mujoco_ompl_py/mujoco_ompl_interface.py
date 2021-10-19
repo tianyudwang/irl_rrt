@@ -26,7 +26,6 @@ class mjtJoint(Enum):
     _mjtJoint (type)
     https://github.com/openai/mujoco-py/blob/master/mujoco_py/generated/const.py#L85-#L89
     """
-
     mjJNT_FREE = 0
     mjJNT_BALL = 1
     mjJNT_SLIDE = 2
