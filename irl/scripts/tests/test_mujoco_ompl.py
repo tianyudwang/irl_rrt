@@ -79,6 +79,7 @@ if __name__ == "__main__":
 
     model = mujoco_py.load_model_from_path(model_fullpath)
     sim = mujoco_py.MjSim(model, nsubsteps=N_SUBSTEPS)
+    d = sim.data
 
     joints = getJointInfo(model)
 

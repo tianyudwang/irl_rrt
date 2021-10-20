@@ -70,6 +70,11 @@ def CLI():
         action="store_true",
         help="Render the environment (useful for tests)",
     )
+    p.add_argument(
+        "--save",
+        action="store_true",
+        help="Render the environment (useful for tests)",
+    )
 
     args = p.parse_args()
     return args
@@ -225,4 +230,12 @@ if __name__ == "__main__":
     )
     ic(qpos_final, qvel_final)
 
-    np.savez(path / "scripts" / "goal.npz", q_pos=qpos_final, q_vel=qvel_final)
+    # save the final position
+    if args.save:
+        np.savez(
+            path / "scripts" / "FetchReach" / "goal.npz",
+            q_pos=qpos_final,
+            q_vel=qvel_final,
+        )
+
+    # min_8: -1.1483931076458946, max_8: 1.8063403389140067
