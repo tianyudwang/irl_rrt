@@ -72,7 +72,7 @@ if __name__ == "__main__":
     path = pathlib.Path(__file__).parent.resolve()
 
     # assets dir (model files)
-    model_dir = path.parent / "assets"
+    model_dir = path.parent / "FetchReach" / "assets"
 
     model_fullpath = os.path.join(model_dir, MODEL_XML_PATH)
     ic(model_fullpath)

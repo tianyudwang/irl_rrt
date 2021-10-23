@@ -42,7 +42,7 @@ class StateRange:
     A class to store information about a state in a MuJoCo model.
     """
 
-    __slots__ = ["type", "limited"]
+    __slots__ = ["range", "limited"]
 
     def __init__(self):
         self.limited: bool
@@ -79,6 +79,6 @@ def getCtrlRange(m: PyMjModel, i: int) -> StateRange:
     assert m.actuator_ctrlrange is not None, "actuator's ctrl range not specified"
     r = StateRange()
     r.limited = bool(m.actuator_ctrllimited[i])
-    r.range[0] = np.asarray(m.ctrl_range).flatten()[2 * i]
-    r.range[1] = np.asarray(m.ctrl_range).flatten()[2 * i + 1]
+    r.range[0] = np.asarray(m.actuator_ctrlrange).flatten()[2 * i]
+    r.range[1] = np.asarray(m.actuator_ctrlrange).flatten()[2 * i + 1]
     return r

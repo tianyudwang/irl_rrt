@@ -193,7 +193,7 @@ def plan(ss: ob.SpaceInformation, param: Dict[str, Any], runtime: float):
         geometricPath.interpolate()
 
         controlPath_np = np.fromstring(
-            geometricPath.printAsMatrix(), dtype=float, sep="\n"
+            controlPath.printAsMatrix(), dtype=float, sep="\n"
         ).reshape(-1, param["state_dim"])
         geometricPath_np = np.fromstring(
             geometricPath.printAsMatrix(), dtype=float, sep="\n"
@@ -322,7 +322,7 @@ if __name__ == "__main__":
 
     # Plan the path
     ss = init_rrt(param)
-    controlPath, controlPath_np, geometricPathm, geometricPath_np = plan(
+    controlPath, controlPath_np, geometricPath, geometricPath_np = plan(
         ss, param, args.runtime
     )
     ic(geometricPath_np, geometricPath_np.shape)
@@ -341,7 +341,7 @@ if __name__ == "__main__":
 
     # Plot the path
     # path = geometricPath_np
-    path = controlPath_np
+    path = geometricPath_np
     # * I add negative to theta
     x_traj = -np.sin(path[:, 0])
     y_traj = np.cos(path[:, 0])

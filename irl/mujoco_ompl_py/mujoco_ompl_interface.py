@@ -1,9 +1,10 @@
 import sys
+import warnings
 
 from copy import deepcopy
 from enum import Enum
 from math import ceil
-from typing import Union
+from typing import Union, Optional
 
 from mujoco_py.cymj import PyMjModel, PyMjData
 from mujoco_py import MjSim
@@ -42,7 +43,7 @@ class mjtJoint(Enum):
     mjJNT_HINGE = 3
 
 
-def make_1D_VecBounds(low: float, high: float) -> ob.RealVectorBounds:
+def make_1D_VecBounds(low: float, high: float, target: Optional[str] = None, tolerance: float = 1e-4) -> ob.RealVectorBounds:
     """
     Create a 1D RealVectorBounds object.
     Apparently OMPL needs bounds
@@ -58,8 +59,18 @@ def make_1D_VecBounds(low: float, high: float) -> ob.RealVectorBounds:
     if low == high:
         # Conside this joint are fixed
         # ompl don't allowed RealVectorBounds with low == high
-        # add a small value to high to foreced it to be a fixed state
-        high += 1e-4
+        # add a small value to bound to foreced it to be a fixed state
+        if target == "high":
+            high += tolerance
+        elif target == "low":
+            low -= tolerance
+        elif target == "both":
+            high += tolerance
+            low -= tolerance
+        elif target is None:
+            warnings.warn("OMPL don't allowed RealVectorBounds with low == high. Please specify them manually!")
+        else:
+            raise ValueError(f"target {target} is not valid")
     bounds = ob.RealVectorBounds(1)
     bounds.setLow(low)
     bounds.setHigh(high)
@@ -134,7 +145,6 @@ def makeCompoundStateSpace(
                 f"Joint qposadr {joint.qposadr}: Joints are not in order of qposadr."
             )
         next_qpos += 1
-        # ! TODO: limited
         # Crate an appropriate subspace based on the joint type
         # 0: free, 1: ball, 2: slide, 3: hinge
         if joint.type == mjtJoint.mjJNT_FREE.value:
@@ -326,11 +336,11 @@ def copyCompoundOmplStateToMujoco(
         else:
             raise ValueError(f"Unknown subspace type {subspace_type}")
 
-        if qpos_i != m.nq:
-            raise ValueError("Size of data copied did not match m.nq")
+    if qpos_i != m.nq:
+        raise ValueError(f"Size of data {qpos_i} copied did not match m.nq: {m.nq}")
 
-        if include_velocity and (qvel_i != m.nv):
-            raise ValueError("Size of data copied did not match m.nv")
+    if include_velocity and (qvel_i != m.nv):
+        raise ValueError("Size of data copied did not match m.nv")
 
 
 def copyRealVectorOmplStateToMujoco(
@@ -429,10 +439,12 @@ def copyMujocoStateToOmpl(
             # Copy the vector
             for j in range(n):
                 if qpos_i < m.nq:
-                    state[j] = d.qpos[qpos_i]
+                    # !This does not work
+                    
+                    state[j][0] = d.qpos[qpos_i]
                     qpos_i += 1
                 else:
-                    state[j] = d.qvel[qvel_i]
+                    state[j][0] = d.qvel[qvel_i]
                     qvel_i += 1
         elif subspace_type == ob.STATE_SPACE_SO2:
             if qpos_i >= m.nq:
@@ -474,7 +486,7 @@ def copyOmplControlToMujoco(
     dim = si.getControlSpace().getDimension()
 
     if dim != m.nu:
-        raise ValueError("SpaceInformation and mjModel do not match in control dim")
+        raise ValueError(f"ControlSpace.getDimension() and mjModel.nu do not match in control dim: {dim}, {m.nu}")
 
     for i in range(dim):
         d.ctrl[i] = control[i]
@@ -543,7 +555,7 @@ class MujocoStatePropagator(oc.StatePropagator):
     def propagate(
         self, state: ob.State, control: oc.Control, duration: float, result: ob.State
     ) -> None:
-        # Copy state
+        # Copy ompl state to mujoco
         copyOmplStateToMujoco(
             state, self.si, self.sim.model, self.sim.data, self.include_velocity
         )
@@ -553,7 +565,7 @@ class MujocoStatePropagator(oc.StatePropagator):
         # mj->sim_duration(duration)
         self.sim_duration(duration)
 
-        copyMujocoStateToOmpl(self.sim.model, self.sim.data, self.si_, result)
+        copyMujocoStateToOmpl(self.sim.model, self.sim.data, self.si, result, self.include_velocity)
 
     def sim_duration(self, duration: float) -> None:
         steps: int = ceil(duration / self.max_timestep)
@@ -582,11 +594,12 @@ class MujocoStateValidityChecker(ob.StateValidityChecker):
 
     def isValid(self, state: ob.State) -> bool:
         """State Validation Check"""
-        temp_sim = deepcopy(self.sim)
+        #! mj_step or mj_forwardPosition not Found!!
+        # maybe should try get state and set state
         copyOmplStateToMujoco(
-            state, self.si, temp_sim.model, temp_sim.data, self.include_velocity
+            state, self.si, self.sim.model, self.sim.data, self.include_velocity
         )
-        temp_sim.step()
-        print("Here Validdddddddddddddddddddddddddddddddd")
-        # return temp_sim.data.ncon == 0  #  'No contacts should be detected here'
-        return True
+        # self.sim.forward()
+        self.sim.step()
+        valid = (self.sim.data.ncon == 0)  #  'No contacts should be detected here'
+        return valid
