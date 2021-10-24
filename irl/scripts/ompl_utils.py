@@ -29,6 +29,29 @@ except ImportError:
     from ompl import control as oc
     from ompl import geometric as og
 
+color2num = dict(
+    gray=30,
+    red=31,
+    green=32,
+    yellow=33,
+    blue=34,
+    magenta=35,
+    cyan=36,
+    white=37,
+    crimson=38
+)
+
+def colorize(string, color, bold=False, highlight=False):
+    """
+    Colorize a string.
+    This function was originally written by John Schulman.
+    """
+    attr = []
+    num = color2num[color]
+    if highlight: num += 10
+    attr.append(str(num))
+    if bold: attr.append('1')
+    return '\x1b[%sm%s\x1b[0m' % (';'.join(attr), string)
 
 def setLogLevel(level: int) -> None:
     """Set the log leve"""
@@ -142,7 +165,7 @@ def init_planning(sim: MjSim, param: Dict[str, Any]):
     if space.isCompound():
         printSubspaceInfo(space, param["start"], param["include_velocity"])
 
-     # Define a simple setup class
+    # Define a simple setup class
     ss = oc.SimpleSetup(si)
 
     # Set state validation check
@@ -180,37 +203,13 @@ def init_planning(sim: MjSim, param: Dict[str, Any]):
 
     return ss
 
-def printSubspaceInfo(
-    space: ob.CompoundStateSpace, start: Optional[np.ndarray] = None, include_velocity: bool = False
-) -> dict:
-    space_dict = OrderedDict()
-    print("\nSubspace info: ")
-    for i in range(space.getSubspaceCount()):
-        subspace = space.getSubspace(i)
-        name = subspace.getName()
-        space_dict[name] = subspace
-        if isinstance(subspace, ob.RealVectorStateSpace):
-            low, high = subspace.getBounds().low, subspace.getBounds().high    
-            
-        elif isinstance(subspace, ob.SO2StateSpace):
-            low, high = [[-np.pi], [np.pi]]
-        
-        elif isinstance(subspace, ob.SE2StateSpace):
-            low, high = subspace.getBounds().low, subspace.getBounds().high
-            # SO2 bound is not inlude in bounds manually add it for visualization 
-            low.append(-np.pi)
-            high.append(np.pi)
-        if include_velocity and i == space.getSubspaceCount() / 2:
-            print("\n  Velocy State Space:")
-        
-        for j in range(len(low)):
-            print(f"  {i}: {name}[{j}]\t[{low[j]}, {high[j]}]")
-    return space_dict
 
-def plan(ss: ob.SpaceInformation, runtime: float, state_dim: int) -> Tuple[oc.PathControl, og.PathGeometric, np.ndarray]:
+def plan(
+    ss: ob.SpaceInformation, runtime: float, state_dim: int
+) -> Tuple[oc.PathControl, og.PathGeometric, np.ndarray]:
     """Attempt to solve the problem"""
     assert isinstance(state_dim, int)
-    
+
     solved = ss.solve(runtime)
     controlPath = None
     controlPath_np = None
@@ -220,17 +219,20 @@ def plan(ss: ob.SpaceInformation, runtime: float, state_dim: int) -> Tuple[oc.Pa
         # Print the path to screen
         controlPath = ss.getSolutionPath()
         controlPath.interpolate()
-        
+
         geometricPath = controlPath.asGeometric()
         # geometricPath.interpolate()
 
         geometricPath_np = np.fromstring(
             geometricPath.printAsMatrix(), dtype=float, sep="\n"
-        ).reshape(-1, )
+        ).reshape(
+            -1,
+        )
         # print("Found solution:\n%s" % path)
     else:
         print("No solution found")
     return controlPath, geometricPath, geometricPath_np
+
 
 def angle_normalize(x) -> float:
     """Converts angles outside of +/-PI to +/-PI"""
@@ -241,28 +243,37 @@ def make_RealVectorBounds(bounds_dim: int, low, high) -> ob.RealVectorBounds:
     assert isinstance(bounds_dim, int), "bonds_dim must be an integer"
     # *OMPL's python binding might not recognize numpy array. convert to list to make it work
     if isinstance(low, np.ndarray):
-        assert low.ndim == 1, "low should be a 1D numpy array to prevent order mismatch when convert to list"
+        assert (
+            low.ndim == 1
+        ), "low should be a 1D numpy array to prevent order mismatch when convert to list"
         low = low.tolist()
-    
+
     if isinstance(high, np.ndarray):
-        assert high.ndim == 1, "high should be a 1D numpy array to prevent order mismatch when convert to list"
-        
+        assert (
+            high.ndim == 1
+        ), "high should be a 1D numpy array to prevent order mismatch when convert to list"
+
         high = high.tolist()
     assert isinstance(low, list), "low should be a list"
     assert isinstance(high, list), "high should be a list"
-    assert len(low) == len(high) == bounds_dim, "low and high must have same length as bonds_dim"
-    
+    assert (
+        len(low) == len(high) == bounds_dim
+    ), "low and high must have same length as bonds_dim"
+
     vector_bounds = ob.RealVectorBounds(bounds_dim)
     for i in range(bounds_dim):
         if low[i] == high[i]:
-            warnings.warn("\n Although it's OK to set a dummy RealVectorBounds with low == high, " + 
-                          "OMPL planning needs lower bound must be stricly less than upper bound " +
-                          "Please specify them manually!")
+            warnings.warn(
+                "\n Although it's OK to set a dummy RealVectorBounds with low == high, "
+                + "OMPL planning needs lower bound must be stricly less than upper bound "
+                + "Please specify them manually!"
+            )
         vector_bounds.setLow(i, low[i])
         vector_bounds.setHigh(i, high[i])
         # Check if the bounds are valid (same length for low and high, high[i] > low[i])
         vector_bounds.check()
     return vector_bounds
+
 
 def printBounds(bounds: ob.RealVectorBounds, title: str) -> None:
     assert isinstance(bounds, ob.RealVectorBounds)
@@ -270,7 +281,47 @@ def printBounds(bounds: ob.RealVectorBounds, title: str) -> None:
     for i, (low, high) in enumerate(zip(bounds.low, bounds.high)):
         print(f"  Bound {i}: {[low, high]}")
     print()
-    
+
+
+def printSubspaceInfo(
+    space: ob.CompoundStateSpace,
+    start: Optional[np.ndarray] = None,
+    include_velocity: bool = False,
+) -> dict:
+    space_dict = OrderedDict()
+    print("\nSubspace info: ")
+    last_subspace_idx = 0
+    for i in range(space.getSubspaceCount()):
+        subspace = space.getSubspace(i)
+        name = subspace.getName()
+        space_dict[name] = subspace
+        if isinstance(subspace, ob.RealVectorStateSpace):
+            low, high = subspace.getBounds().low, subspace.getBounds().high
+
+        elif isinstance(subspace, ob.SO2StateSpace):
+            low, high = [[-np.pi], [np.pi]]
+
+        elif isinstance(subspace, ob.SE2StateSpace):
+            low, high = subspace.getBounds().low, subspace.getBounds().high
+            # SO2 bound is not inlude in bounds manually add it for visualization
+            low.append(-np.pi)
+            high.append(np.pi)
+        if include_velocity and i == space.getSubspaceCount() / 2:
+            print("\n  Velocy State Space:")
+
+        for j in range(len(low)):
+            print(f"  {i}: {name}[{j}]\t[{low[j]}, {high[j]}]")
+            if start is not None:
+                assert low[j] <= start[i + j] <= high[j], (
+                    f"start value: {start[i+j]} "
+                    + f"is not in range [{low[j]}, {high[j]}] "
+                    + f"at subspace ({i}) with inner index ({j})."
+                )
+            last_subspace_idx += 1
+
+    return space_dict
+
+
 def CLI():
     parser = argparse.ArgumentParser(description="OMPL Control planning")
     parser.add_argument(
@@ -312,7 +363,10 @@ def CLI():
         "--visual", "-v", help="visulaize environment", action="store_true"
     )
     parser.add_argument(
-        "--dummy_setup", "-d", help="a naive setup for State Space and Control Space relied solely on xml file", action="store_true"
+        "--dummy_setup",
+        "-d",
+        help="a naive setup for State Space and Control Space relied solely on xml file",
+        action="store_true",
     )
     parser.add_argument(
         "--verbose", help="Print additional information", action="store_true"
