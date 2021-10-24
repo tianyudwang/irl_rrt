@@ -1,0 +1,51 @@
+_collision: null
+_init_positons:
+- 0.0
+- 0.0
+_init_torso_x: 8.0
+_init_torso_y: 8.0
+
+#  [B, B, B, B, B],
+#  [B, R, E, E, B],
+#  [B, B, B, E, B],
+#  [B, E, E, E, B],
+#  [B, B, B, B, B],
+_maze_structure:
+- - 1
+  - 1
+  - 1
+  - 1
+  - 1
+- - 1
+  - -1
+  - 0
+  - 0
+  - 1
+- - 1
+  - 1
+  - 1
+  - 0
+  - 1
+- - 1
+  - 0
+  - 0
+  - 0
+  - 1
+- - 1
+  - 1
+  - 1
+  - 1
+  - 1
+_put_spin_near_agent: false
+_xy_limits:
+- -4.0
+- 20.0
+- -4.0
+- 20.0
+blocks: false
+elevated: false
+goal:
+- 0.0
+- 16.0
+goal_threshold: 0.6
+maze_size_scaling: 8.0

@@ -1,6 +1,14 @@
+import argparse
 import random
+import warnings
+
+from typing import Optional, Dict, Any, Tuple
+from collections import OrderedDict
 
 import numpy as np
+from mujoco_py import MjSim
+
+import irl.mujoco_ompl_py.mujoco_ompl_interface as mj_ompl
 
 try:
     from ompl import util as ou
@@ -123,6 +131,184 @@ def getPathLengthObjWithCostToGo(si):
     return obj
 
 
+def init_planning(sim: MjSim, param: Dict[str, Any]):
+    # Construct the State Space we are planning in [theta, theta_dot]
+
+    si = mj_ompl.createSpaceInformation(
+        m=sim.model,
+        include_velocity=param["include_velocity"],
+    )
+    space = si.getStateSpace()
+    if space.isCompound():
+        printSubspaceInfo(space, param["start"], param["include_velocity"])
+
+     # Define a simple setup class
+    ss = oc.SimpleSetup(si)
+
+    # Set state validation check
+    mj_validityChecker = mj_ompl.MujocoStateValidityChecker(
+        si, sim, include_velocity=param["include_velocity"]
+    )
+    ss.setStateValidityChecker(mj_validityChecker)
+
+    # Set State Propagator
+    mj_propagator = mj_ompl.MujocoStatePropagator(
+        si, sim, include_velocity=param["include_velocity"]
+    )
+    ss.setStatePropagator(mj_propagator)
+
+    # Set propagation step size
+    si.setPropagationStepSize(sim.model.opt.timestep)
+
+    # Create a start state and a goal state
+    start_state = ob.State(si)
+    goal_state = ob.State(si)
+
+    for i in range(param["start"].shape[0]):
+        start_state[i] = param["start"][i]
+        goal_state[i] = param["goal"][i]
+
+    # Set the start state and goal state
+    ss.setStartAndGoalStates(start_state, goal_state, 0.05)
+
+    # Allocate and set the planner to the SimpleSetup
+    planner = allocateControlPlanner(si, plannerType=param["plannerType"])
+    ss.setPlanner(planner)
+
+    # Set optimization objective
+    ss.setOptimizationObjective(ob.PathLengthOptimizationObjective(si))
+
+    return ss
+
+def printSubspaceInfo(
+    space: ob.CompoundStateSpace, start: Optional[np.ndarray] = None, include_velocity: bool = False
+) -> dict:
+    space_dict = OrderedDict()
+    print("\nSubspace info:")
+    for i in range(space.getSubspaceCount()):
+        subspace = space.getSubspace(i)
+        name = subspace.getName()
+        space_dict[name] = subspace
+        if isinstance(subspace, ob.RealVectorStateSpace):
+            low, high = subspace.getBounds().low, subspace.getBounds().high    
+        
+        elif isinstance(subspace, ob.SO2StateSpace):
+            low, high = [[-np.pi], [np.pi]]
+        
+        elif isinstance(subspace, ob.SE2StateSpace):
+            low, high = subspace.getBounds().low, subspace.getBounds().high
+        
+        if include_velocity and i == space.getSubspaceCount() / 2:
+            print("\n  Velocy State Space:")
+        
+        for j in range(len(low)):
+            print(f"  {i}: {name}[{j}]\t[{low[j]}, {high[j]}]")
+    return space_dict
+
+def plan(ss: ob.SpaceInformation, param: Dict[str, Any], runtime: float) -> Tuple[oc.PathControl, og.PathGeometric, np.ndarray]:
+    """Attempt to solve the problem"""
+    solved = ss.solve(runtime)
+    controlPath = None
+    controlPath_np = None
+    geometricPath = None
+    geometricPath_np = None
+    if solved:
+        # Print the path to screen
+        controlPath = ss.getSolutionPath()
+        controlPath.interpolate()
+        
+        geometricPath = controlPath.asGeometric()
+        # geometricPath.interpolate()
+
+        geometricPath_np = np.fromstring(
+            geometricPath.printAsMatrix(), dtype=float, sep="\n"
+        ).reshape(-1, param["state_dim"])
+        # print("Found solution:\n%s" % path)
+    else:
+        print("No solution found")
+    return controlPath, geometricPath, geometricPath_np
+
 def angle_normalize(x) -> float:
     """Converts angles outside of +/-PI to +/-PI"""
     return ((x + np.pi) % (2 * np.pi)) - np.pi
+
+
+def make_RealVectorBounds(bounds_dim: int, low, high) -> ob.RealVectorBounds:
+    assert isinstance(bounds_dim, int), "bonds_dim must be an integer"
+    # *OMPL don't recognize numpy array
+    if isinstance(low, np.ndarray):
+        assert low.ndim == 1, "low should be a 1D numpy array to prevent order mismatch when convert to list"
+        low = low.tolist()
+    
+    if isinstance(high, np.ndarray):
+        assert high.ndim == 1, "high should be a 1D numpy array to prevent order mismatch when convert to list"
+        
+        high = high.tolist()
+    assert isinstance(low, list), "low should be a list"
+    assert isinstance(high, list), "high should be a list"
+    assert len(low) == len(high) == bounds_dim, "low and high must have same length as bonds_dim"
+    
+    vector_bounds = ob.RealVectorBounds(bounds_dim)
+    for i in range(bounds_dim):
+        if low[i] == high[i]:
+            warnings.warn("\n Although it's OK to set a dummy RealVectorBounds with low == high, " + 
+                          "OMPL planning needs lower bound must be stricly less than upper bound " +
+                          "Please specify them manually!")
+        vector_bounds.setLow(i, low[i])
+        vector_bounds.setHigh(i, high[i])
+        # Check if the bounds are valid (same length for low and high, high[i] > low[i])
+        vector_bounds.check()
+    return vector_bounds
+
+def printBounds(bounds: ob.RealVectorBounds, title: str) -> None:
+    assert isinstance(bounds, ob.RealVectorBounds)
+    print(f"\n{title}:")
+    for i, (low, high) in enumerate(zip(bounds.low, bounds.high)):
+        print(f"  Bound {i}: {[low, high]}")
+
+def CLI():
+    parser = argparse.ArgumentParser(description="OMPL Control planning")
+    parser.add_argument(
+        "--env_id",
+        "-env",
+        type=str,
+        help="Envriment to interact with",
+        choices=["InvertedPendulum-v2", "PointUMaze-v0", "AntUMaze-v0"],
+        required=True,
+    )
+    parser.add_argument(
+        "-t",
+        "--runtime",
+        type=float,
+        default=5.0,
+        help="(Optional) Specify the runtime in seconds. Defaults to 1 and must be greater than 0.",
+    )
+    parser.add_argument(
+        "--planner",
+        type=str,
+        choices=["RRT", "SST", "KPIECE", "KPIECE1"],
+        default="RRT",
+        help="The planner to use, either RRT or SST or KPIECE",
+    )
+    parser.add_argument(
+        "-i",
+        "--info",
+        type=int,
+        default=2,
+        choices=[0, 1, 2],
+        help="(Optional) Set the OMPL log level. 0 for WARN, 1 for INFO, 2 for DEBUG. Defaults to WARN.",
+    )
+    parser.add_argument("--seed", help="Random generator seed", type=int, default=0)
+    parser.add_argument("--plot", "-p", help="Render environment", action="store_true")
+    parser.add_argument(
+        "--render", "-r", help="Render environment", action="store_true"
+    )
+    parser.add_argument(
+        "--visual", "-v", help="visulaize environment", action="store_true"
+    )
+    parser.add_argument(
+        "--dummy_setup", "-d", help="a naive setup for State Space and Control Space relied solely on xml file", action="store_true"
+    )
+    parser.add_argument("--render_video", "-rv", help="Save a gif", action="store_true")
+    args = parser.parse_args()
+    return args

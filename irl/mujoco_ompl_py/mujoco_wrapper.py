@@ -42,14 +42,15 @@ class StateRange:
     A class to store information about a state in a MuJoCo model.
     """
 
-    __slots__ = ["range", "limited"]
+    __slots__ = ["index", "range", "limited"]
 
     def __init__(self):
+        self.index: int
         self.limited: bool
         self.range: List[float, float] = [None, None]
 
     def __repr__(self):
-        return f"StateRange\n(range:{self.range},\n" + f"limit:{self.limited},\n"
+        return f"StateRange {self.index}: (range:{self.range}, " + f"limit:{self.limited},\n"
 
 
 def getJointInfo(m: PyMjModel):
@@ -78,7 +79,17 @@ def getCtrlRange(m: PyMjModel, i: int) -> StateRange:
     assert m.actuator_ctrllimited is not None, "actuator's ctrl limited not specified"
     assert m.actuator_ctrlrange is not None, "actuator's ctrl range not specified"
     r = StateRange()
+    r.index = i
     r.limited = bool(m.actuator_ctrllimited[i])
     r.range[0] = np.asarray(m.actuator_ctrlrange).flatten()[2 * i]
     r.range[1] = np.asarray(m.actuator_ctrlrange).flatten()[2 * i + 1]
     return r
+
+def getCtrlInfo(m: PyMjModel) -> List[StateRange]:
+    """
+    Obtain information about the ctrls in the Mujoco model.
+    """
+    ctrls = []
+    for i in range(m.nu):
+        ctrls.append(getCtrlRange(m, i))
+    return ctrls

@@ -1,7 +1,6 @@
 import sys
 import warnings
 
-from copy import deepcopy
 from enum import Enum
 from math import ceil
 from typing import Union, Optional
@@ -9,7 +8,7 @@ from typing import Union, Optional
 from mujoco_py.cymj import PyMjModel, PyMjData
 from mujoco_py import MjSim
 
-from irl.mujoco_ompl_py.mujoco_wrapper import getJointInfo, getCtrlRange
+from irl.mujoco_ompl_py.mujoco_wrapper import getJointInfo, getCtrlRange, getCtrlInfo
 
 try:
     from ompl import base as ob
@@ -68,7 +67,7 @@ def make_1D_VecBounds(low: float, high: float, target: Optional[str] = None, tol
             high += tolerance
             low -= tolerance
         elif target is None:
-            warnings.warn("OMPL don't allowed RealVectorBounds with low == high. Please specify them manually!")
+            warnings.warn("\nOMPL don't allowed RealVectorBounds with low == high. Please specify them manually!")
         else:
             raise ValueError(f"target {target} is not valid")
     bounds = ob.RealVectorBounds(1)
