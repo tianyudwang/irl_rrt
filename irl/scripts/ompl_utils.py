@@ -184,20 +184,22 @@ def printSubspaceInfo(
     space: ob.CompoundStateSpace, start: Optional[np.ndarray] = None, include_velocity: bool = False
 ) -> dict:
     space_dict = OrderedDict()
-    print("\nSubspace info:")
+    print("\nSubspace info: ")
     for i in range(space.getSubspaceCount()):
         subspace = space.getSubspace(i)
         name = subspace.getName()
         space_dict[name] = subspace
         if isinstance(subspace, ob.RealVectorStateSpace):
             low, high = subspace.getBounds().low, subspace.getBounds().high    
-        
+            
         elif isinstance(subspace, ob.SO2StateSpace):
             low, high = [[-np.pi], [np.pi]]
         
         elif isinstance(subspace, ob.SE2StateSpace):
             low, high = subspace.getBounds().low, subspace.getBounds().high
-        
+            # SO2 bound is not inlude in bounds manually add it for visualization 
+            low.append(-np.pi)
+            high.append(np.pi)
         if include_velocity and i == space.getSubspaceCount() / 2:
             print("\n  Velocy State Space:")
         
@@ -205,8 +207,10 @@ def printSubspaceInfo(
             print(f"  {i}: {name}[{j}]\t[{low[j]}, {high[j]}]")
     return space_dict
 
-def plan(ss: ob.SpaceInformation, param: Dict[str, Any], runtime: float) -> Tuple[oc.PathControl, og.PathGeometric, np.ndarray]:
+def plan(ss: ob.SpaceInformation, runtime: float, state_dim: int) -> Tuple[oc.PathControl, og.PathGeometric, np.ndarray]:
     """Attempt to solve the problem"""
+    assert isinstance(state_dim, int)
+    
     solved = ss.solve(runtime)
     controlPath = None
     controlPath_np = None
@@ -222,7 +226,7 @@ def plan(ss: ob.SpaceInformation, param: Dict[str, Any], runtime: float) -> Tupl
 
         geometricPath_np = np.fromstring(
             geometricPath.printAsMatrix(), dtype=float, sep="\n"
-        ).reshape(-1, param["state_dim"])
+        ).reshape(-1, )
         # print("Found solution:\n%s" % path)
     else:
         print("No solution found")
@@ -235,7 +239,7 @@ def angle_normalize(x) -> float:
 
 def make_RealVectorBounds(bounds_dim: int, low, high) -> ob.RealVectorBounds:
     assert isinstance(bounds_dim, int), "bonds_dim must be an integer"
-    # *OMPL don't recognize numpy array
+    # *OMPL's python binding might not recognize numpy array. convert to list to make it work
     if isinstance(low, np.ndarray):
         assert low.ndim == 1, "low should be a 1D numpy array to prevent order mismatch when convert to list"
         low = low.tolist()
@@ -262,10 +266,11 @@ def make_RealVectorBounds(bounds_dim: int, low, high) -> ob.RealVectorBounds:
 
 def printBounds(bounds: ob.RealVectorBounds, title: str) -> None:
     assert isinstance(bounds, ob.RealVectorBounds)
-    print(f"\n{title}:")
+    print(f"{title}:")
     for i, (low, high) in enumerate(zip(bounds.low, bounds.high)):
         print(f"  Bound {i}: {[low, high]}")
-
+    print()
+    
 def CLI():
     parser = argparse.ArgumentParser(description="OMPL Control planning")
     parser.add_argument(
@@ -308,6 +313,9 @@ def CLI():
     )
     parser.add_argument(
         "--dummy_setup", "-d", help="a naive setup for State Space and Control Space relied solely on xml file", action="store_true"
+    )
+    parser.add_argument(
+        "--verbose", help="Print additional information", action="store_true"
     )
     parser.add_argument("--render_video", "-rv", help="Save a gif", action="store_true")
     args = parser.parse_args()

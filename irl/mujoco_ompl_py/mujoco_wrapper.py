@@ -1,7 +1,7 @@
 from typing import List
 
 import numpy as np
-from mujoco_py.cymj import PyMjModel
+from mujoco_py.cymj import PyMjModel  # noqa
 
 
 mjJNT = {

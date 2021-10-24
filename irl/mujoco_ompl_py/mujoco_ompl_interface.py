@@ -5,7 +5,7 @@ from enum import Enum
 from math import ceil
 from typing import Union, Optional
 
-from mujoco_py.cymj import PyMjModel, PyMjData
+from mujoco_py.cymj import PyMjModel, PyMjData  # noqa
 from mujoco_py import MjSim
 
 from irl.mujoco_ompl_py.mujoco_wrapper import getJointInfo, getCtrlRange, getCtrlInfo
