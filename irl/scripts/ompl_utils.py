@@ -225,6 +225,7 @@ def plan(
         # (the controls and duration in the first row are all zeros).
         controlPath = ss.getSolutionPath()
         # the matrix consists of all the states along the path, one per row.
+        # asGeometry() returns a path geometry (interpolation is performed and then states are copied)
         geometricPath = controlPath.asGeometric()
 
         # To visualize the path,
@@ -383,6 +384,9 @@ def CLI():
     )
     parser.add_argument(
         "--verbose", help="Print additional information", action="store_true"
+    )
+    parser.add_argument(
+        "--custom_goal", '-g', help="Define a custom goal state", action="store_true"
     )
     parser.add_argument("--render_video", "-rv", help="Save a gif", action="store_true")
     args = parser.parse_args()

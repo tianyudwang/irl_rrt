@@ -2,11 +2,13 @@ import sys
 import os
 import time
 import pathlib
+from gym.envs.registration import make
 
 import yaml
 
 import numpy as np
 import matplotlib.pyplot as plt
+
 
 import gym
 import mujoco_maze
@@ -105,22 +107,119 @@ def find_invalid_states(
         print(ompl_utils.colorize(f"  invalid: {i}", "red"))
 
 
-def visualize_path(path_file: str):
+def visualize_path(path_file: str, goal=[0, 8]):
     """
     From https://ompl.kavrakilab.org/pathVisualization.html
     """
     data = np.loadtxt(path_file)
     fig = plt.figure()
     ax = plt.axes(projection="3d")
-    ax.plot(data[:, 1], data[:, 2], "o-")
+    # path
+    ax.plot(data[:, 0], data[:, 1], "o-")
+
     ax.plot(
-        data[0, 1], data[0, 2], "go", markersize=10, markeredgecolor="k", label="start"
+        data[0, 0], data[0, 1], "go", markersize=10, markeredgecolor="k", label="start"
     )
     ax.plot(
-        data[-1, 1], data[-1, 2], "ro", markersize=10, markeredgecolor="k", label="goal"
+        data[-1, 0],
+        data[-1, 1],
+        "ro",
+        markersize=10,
+        markeredgecolor="k",
+        label="achieved goal",
     )
+    ax.plot(
+        goal[0], goal[1], "bo", markersize=10, markeredgecolor="k", label="desired goal"
+    )
+    plt.xlim(-4, 12)
+    plt.ylim(-4, 12)
     plt.legend()
     plt.show()
+
+
+def makeStateSpace(
+    param: dict, lock: bool = True, verbose: bool = False
+) -> ob.StateSpace:
+    """
+    Create a state space.
+    """
+    # State Space (A compound space include SO3 and accosicated velocity).
+    # SE2 = R^2 + SO2. Should not set the bound for SO2 since it is enfored automatically.
+    SE2_space = ob.SE2StateSpace()
+    SE2_bounds = ompl_utils.make_RealVectorBounds(
+        bounds_dim=2,
+        low=param["obs_low"][:2],
+        high=param["obs_high"][:2],
+    )
+    SE2_space.setBounds(SE2_bounds)
+
+    # velocity space.
+    velocity_space = ob.RealVectorStateSpace(3)
+    v_bounds = ompl_utils.make_RealVectorBounds(
+        bounds_dim=3,
+        low=param["obs_low"][3:-1],
+        high=param["obs_high"][3:-1],
+    )
+    velocity_space.setBounds(v_bounds)
+
+    # Add subspace to the compound space.
+    space = ob.CompoundStateSpace()
+    space.addSubspace(SE2_space, 1.0)
+    space.addSubspace(velocity_space, 1.0)
+
+    # Lock this state space. This means no further spaces can be added as components.
+    if space.isCompound() and lock:
+        space.lock()
+
+    if verbose:
+        print("State Bounds Info:")
+        ompl_utils.printBounds(SE2_bounds, title="SE2 bounds")
+        ompl_utils.printBounds(v_bounds, title="Velocity bounds")
+    return space
+
+
+def makeControlSpace(
+    state_space: ob.StateSpace, param: dict, verbose: bool = False
+) -> oc.ControlSpace:
+    """
+    Create a control space and set the bounds for the control space
+    """
+    cspace = oc.RealVectorControlSpace(state_space, 2)
+    c_bounds = ompl_utils.make_RealVectorBounds(
+        bounds_dim=2,
+        low=param["c_bounds_low"],
+        high=param["c_bounds_high"],
+    )
+    cspace.setBounds(c_bounds)
+    if verbose:
+        print("Control Bounds Info:")
+        ompl_utils.printBounds(c_bounds, title="Control bounds")
+    return cspace
+
+
+def makeStartState(space: ob.StateSpace, pos: np.ndarray) -> ob.State:
+    """
+    Create a start state.
+    """
+    if isinstance(pos, np.ndarray):
+        assert pos.ndim == 1
+    start = ob.State(space)
+    for i in range(len(pos)):
+        start[i] = pos[i]
+
+    return start
+
+
+def makeGoalState(space: ob.StateSpace, pos: np.ndarray) -> ob.State:
+    """
+    Create a goal state.
+    """
+    if isinstance(pos, np.ndarray):
+        assert pos.ndim == 1
+    goal = ob.State(space)
+    for i in range(len(pos)):
+        goal[i] = pos[i]
+    return goal
 
 
 """
@@ -128,10 +227,33 @@ def visualize_path(path_file: str):
 -4 ["B",  "B",  "B",  "B",  "B"],
 0  ["B",  "R",  "E",  "E",  "B"],
 4  ["B",  "B",  "B",  "E",  "B"],
-8  ["B",  "G",  "E",  "E",  "B"],
+8  ["B",  "E",  "E",  "E",  "B"],
 12 ["B",  "B",  "B",  "B",  "B"],
    -4      0     4     8       12
 """
+
+
+class MazeGoal(ob.Goal):
+    def __init__(self, si: oc.SpaceInformation, goal: np.ndarray, threshold: float):
+        super().__init__(si)
+        assert goal.ndim == 1
+        self.si = si
+        self.goal = goal[:2]
+        self.threshold = threshold
+
+    # def isSatisfied(self, state: ob.State, distance: float) -> bool:
+    def isSatisfied(self, state: ob.State) -> bool:
+        """
+        Check if the state is the goal.
+        """
+        SE2_state = state[0]
+        x, y = SE2_state.getX(), SE2_state.getY()
+        euclidean_dist = self.euc_dist(np.array([x, y]))
+        return euclidean_dist <= self.threshold
+
+    def euc_dist(self, state: np.ndarray) -> float:
+        assert len(state) == 2
+        return np.sum(np.square(state - self.goal[:2])) ** 0.5
 
 
 class PointStateValidityChecker(ob.StateValidityChecker):
@@ -149,13 +271,15 @@ class PointStateValidityChecker(ob.StateValidityChecker):
         SE2_state = state[0]
         assert isinstance(SE2_state, ob.SE2StateSpace.SE2StateInternal)
 
-        # import ipdb; ipdb.set_trace()
-
         x_pos = SE2_state.getX()
         y_pos = SE2_state.getY()
         yaw_angle = SE2_state.getYaw()
+        if not (-np.pi <= yaw_angle <= np.pi):
+            ic(yaw_angle)
+            assert False
         valid = False
-
+        
+        # state out of bounds
         if not self.si.satisfiesBounds(state):
             return False
 
@@ -164,7 +288,7 @@ class PointStateValidityChecker(ob.StateValidityChecker):
         # * However, the actual qpos = initial_qpos + noise (Uniform [low=-0.1, high=0.1])
         # *          the actual qvel = initial_qvel + noise (standard normal * 0.1)
         # * Leading to invalid initial states (sometimes).
-        if -self.noise_high <= x_pos <= 10:  # This should always be true.
+        if -self.noise_high <= x_pos <= 10:
             if 8 <= x_pos <= 10 and 4 <= y_pos <= 8:
                 valid = True
             else:
@@ -198,8 +322,10 @@ class MotionValidator(ob.MotionValidator):
         old_pos = np.array([s1[0].getX(), s1[0].getY()])
         new_pos = np.array([s2[0].getX(), s2[0].getY()])
 
+        print("printsssssssssssssssssssssssssssssssssssssssss")
         col = self.collision.detect(old_pos, new_pos)
-        return col is None
+        # return col is None
+        return False
 
 
 class PointStatePropagator(oc.StatePropagator):
@@ -230,8 +356,8 @@ class PointStatePropagator(oc.StatePropagator):
         qpos = np.array([SE2_state.getX(), SE2_state.getY(), SE2_state.getYaw()])
         qvel = np.array([V_state[0], V_state[1], V_state[2]])
 
-        qpos[2] += control[1] 
-        
+        qpos[2] += control[1]
+
         # Clip orientation
         # ! deperacated : a single clip can not constrain the angle larger than 3 pi
         # if qpos[2] < -np.pi:
@@ -239,9 +365,9 @@ class PointStatePropagator(oc.StatePropagator):
         # elif np.pi < qpos[2]:
         #     qpos[2] -= np.pi * 2
         qpos[2] = ompl_utils.angle_normalize(qpos[2])
+        assert -np.pi <= qpos[2] <= np.pi
         ori = qpos[2]
-        assert (-np.pi <= ori <= np.pi)
-        
+
         # Compute increment in each direction
         qpos[0] += np.cos(ori) * control[0]
         qpos[1] += np.sin(ori) * control[0]
@@ -257,6 +383,11 @@ class PointStatePropagator(oc.StatePropagator):
 
         # TODO: investigate duration
 
+        # yaw angle migh be out of range [-pi, pi] after several steps.
+        # Should enforced yaw angle since it should always in bounds
+        next_obs[2] = ompl_utils.angle_normalize(next_obs[2])
+        assert -np.pi <= next_obs[2] <= np.pi
+
         # next SE2_state: next_qpos = [x, y, Yaw]
         result[0].setX(next_obs[0])
         result[0].setY(next_obs[1])
@@ -266,10 +397,9 @@ class PointStatePropagator(oc.StatePropagator):
         result[1][0] = next_obs[3]
         result[1][1] = next_obs[4]
         result[1][2] = next_obs[5]
-
-        if not self.si.satisfiesBounds(result):
-            print_state(result, loc="\nIn StatePropagator", color='red')
-            find_invalid_states(result, bounds_low=self.bounds_low, bounds_high=self.bounds_high)
+        # if not self.si.satisfiesBounds(result):
+        #     print_state(result, loc="\nIn StatePropagator", color='red')
+        #     find_invalid_states(result, bounds_low=self.bounds_low, bounds_high=self.bounds_high)
 
     # def sim_duration(self, duration: float) -> None:
     #     steps: int = np.ceil(duration / self.max_timestep)
@@ -338,6 +468,8 @@ if __name__ == "__main__":
     maze_env = env.unwrapped
     maze_task = env.unwrapped._task
     # agent_model = env.unwrapped.wrapped_env
+    old_sim_state = env.unwrapped.wrapped_env.sim.get_state()
+    ic(old_sim_state)
 
     # Get the maze structure
     maze_structure = env.unwrapped._maze_structure
@@ -356,7 +488,7 @@ if __name__ == "__main__":
     maze_env_config = {
         # start positon is [qpos, qvel] + random noise
         # https://github.com/kngwyu/mujoco-maze/blob/main/mujoco_maze/point.py#L61-#L71
-        "start": env.unwrapped.wrapped_env._get_obs(),
+        "start": np.concatenate([old_sim_state.qpos, old_sim_state.qvel]),
         # self.goals = [MazeGoal(np.array([0.0, 2.0 * scale]))]
         "goal": np.concatenate([maze_task.goals[0].pos, np.zeros(4)]),
         "goal_threshold": env.unwrapped._task.goals[0].threshold,  # 0.6
@@ -377,18 +509,18 @@ if __name__ == "__main__":
             env.unwrapped._xy_limits()
         ),  # equavalent to env.observation_space's low and high
     }
-    ic(maze_env_config)
+    # ic(maze_env_config)
 
-    VELOCITY_LIMITS = env.unwrapped.wrapped_env.VELOCITY_LIMITS
+    qvel_max = env.unwrapped.wrapped_env.VELOCITY_LIMITS
     PointEnv_config = {
         # C++ don't recognize numpy array change to list
         "obs_high": env.observation_space.high.tolist(),
         "obs_low": env.observation_space.low.tolist(),
         "act_high": env.action_space.high.tolist(),
         "act_low": env.action_space.low.tolist(),
-        "velocity_limits": VELOCITY_LIMITS,  # 10.0
-        "c_bounds_low": [-VELOCITY_LIMITS, -VELOCITY_LIMITS],
-        "c_bounds_high": [VELOCITY_LIMITS, VELOCITY_LIMITS],
+        "velocity_limits": qvel_max,  # 10.0
+        "c_bounds_low": [-qvel_max, -qvel_max],
+        "c_bounds_high": [qvel_max, qvel_max],
     }
 
     if args.dummy_setup:
@@ -400,71 +532,56 @@ if __name__ == "__main__":
         if dummy_space.isCompound():
             ompl_utils.printSubspaceInfo(dummy_space, None, include_velocity=True)
 
-    # State Space (A compound space include SO3 and accosicated velocity).
-    # SE2 = R^2 + SO2. Should not set the bound for SO2 since it is enfored automatically.
-    SE2_space = ob.SE2StateSpace()
-    SE2_bounds = ompl_utils.make_RealVectorBounds(
-        bounds_dim=2,
-        low=PointEnv_config["obs_low"][:2],
-        high=PointEnv_config["obs_high"][:2],
-    )
-    SE2_space.setBounds(SE2_bounds)
-    # print("Bounds Info:")
-    # ompl_utils.printBounds(SE2_bounds, title="SE2 bounds")
-
-    # velocity space.
-    velocity_space = ob.RealVectorStateSpace(3)
-    v_bounds = ompl_utils.make_RealVectorBounds(
-        bounds_dim=3,
-        low=PointEnv_config["obs_low"][3:-1],
-        high=PointEnv_config["obs_high"][3:-1],
-    )
-    velocity_space.setBounds(v_bounds)
-    # ompl_utils.printBounds(v_bounds, title="Velocity bounds")
-
-    # Add subspace to the compound space.
-    space = ob.CompoundStateSpace()
-    space.addSubspace(SE2_space, 1.0)
-    space.addSubspace(velocity_space, 1.0)
-
-    # Lock this state space. This means no further spaces can be added as components.
-    space.lock()
-
-    # Create a control space and set the bounds for the control space
-    cspace = oc.RealVectorControlSpace(space, 2)
-    c_bounds = ompl_utils.make_RealVectorBounds(
-        bounds_dim=2,
-        low=PointEnv_config["c_bounds_low"],
-        high=PointEnv_config["c_bounds_high"],
-    )
-    cspace.setBounds(c_bounds)
-    # ompl_utils.printBounds(c_bounds, title="Control bounds")
-
-    # Set the start state and goal state
-    start = ob.State(space)
-    goal = ob.State(space)
-    ic(maze_env_config["start"])
-    ic(maze_env_config["goal"])
-
-    for i in range(maze_env_config["start"].shape[0]):
-        start[i] = maze_env_config["start"][i]
-        goal[i] = maze_env_config["goal"][i]
-
+    # ===========================================================================
+    # Define State Space and Control Space
+    space = makeStateSpace(PointEnv_config, lock=True, verbose=args.verbose)
+    cspace = makeControlSpace(space, PointEnv_config)
+    if space.isCompound():
+        print(ompl_utils.colorize("-" * 120, color="magenta"))
+        space_dict = ompl_utils.printSubspaceInfo(
+            space, maze_env_config["start"], include_velocity=True
+        )
+        print(ompl_utils.colorize("-" * 120, color="magenta"))
+    # ===========================================================================
     # Define a simple setup class
     ss = oc.SimpleSetup(cspace)
 
-    # Set the start and goal states with threshold
-    # ss.setStartAndGoalStates(start, goal, maze_env_config["goal_threshold"])
-    ss.setStartAndGoalStates(start, goal, 0.05)
-
-    # retrieve the Space Information from the SimpleSetup
+    # Retrieve current instance of Space Information
     si = ss.getSpaceInformation()
 
-    # Set state validation check
+    # Retrieve current instance of the problem definition
+    pdef = ss.getProblemDefinition()
+
+    # ===========================================================================
+    # Set the start state and goal state
+    start = makeStartState(space, maze_env_config["start"])
+    threshold = 0.05
+    # threshold = maze_env_config["goal_threshold"]
+
+    if args.custom_goal:
+        goal = MazeGoal(si, maze_env_config["goal"], threshold)
+        ss.setStartState(start)
+        pdef.setGoal(goal)
+
+    else:
+        goal = makeGoalState(space, maze_env_config["goal"])
+        # Set the start and goal states with threshold  # ? Should we use a smaller threshold?
+        ss.setStartAndGoalStates(start, goal, threshold)
+
+    ic(maze_env_config["start"])
+    ic(maze_env_config["goal"])
+    # ===========================================================================
+    # Set State Validation Checker
     stateValidityChecker = PointStateValidityChecker(si)
     ss.setStateValidityChecker(stateValidityChecker)
 
-    # State propagator
+    # Set Motion Validation Checker
+    motion_valid_checker = MotionValidator(si, collision=env.unwrapped._collision)
+    # * setMotionValidator() seems that can only be called from si
+    si.setMotionValidator(motion_valid_checker)
+
+    # ===========================================================================
+    # Set State Propagator
     propagator = PointStatePropagator(
         si,
         env.unwrapped.wrapped_env,
@@ -475,8 +592,9 @@ if __name__ == "__main__":
     # Set propagator step size
     si.setPropagationStepSize(
         env.unwrapped.wrapped_env.sim.model.opt.timestep
-    )  # deafult 0.05, 0.02 in Mujoco
+    )  # deafult 0.05in ompl. 0.02 in Mujoco
 
+    # ===========================================================================
     # Allocate and set the planner to the SimpleSetup
     planner = ompl_utils.allocateControlPlanner(si, plannerType=args.planner)
     ss.setPlanner(planner)
@@ -484,36 +602,46 @@ if __name__ == "__main__":
     # Set optimization objective
     ss.setOptimizationObjective(ob.PathLengthOptimizationObjective(si))
 
+    # is Steup?
+    print(
+        ompl_utils.colorize(f"Is spaceInformation Steup?: {si.isSetup()}", color="blue")
+    )
+    if not si.isSetup():
+        si.setup()
+
+    # ===========================================================================
     """
     Possible Error:
         (1) Error:   RRT: There are no valid initial states!
             - Check if the start state is in bounds
             - Check if the start state in stateValidityChecker.isvalid()
-            - CHeck the state valid condition
+            - Check if there is noise add to start state
+            - Check the state valid condition
         (2)  bounds not satisfied in propogator.propagate()
             - Check if there is a clip in control during the calculation. (should enforce it as the cbounds)
             - ompl check first state and call propagate() first and then pass to isValid()
                 It is OK that `result` state is not in bounds. It will be invalid in stateValidityChecker.isvalid()
-            - one loop wrap angle cannot properly warp the angle > abs(3* pi) 
+            - one loop wrap angle cannot properly warp the angle > abs(3* pi)
+            - Remember to check the angle after sim.step. It might be out of [-pi, pi] 
     """
-
-    if space.isCompound():
-        print(ompl_utils.colorize("-" * 120, color="magenta"))
-        space_dict = ompl_utils.printSubspaceInfo(
-            space, maze_env_config["start"], include_velocity=True
-        )
-        print(ompl_utils.colorize("-" * 120, color="magenta"))
 
     # Plan
     controlPath, geometricPath = ompl_utils.plan(ss, args.runtime)
 
+    # Make the path such that all controls are applied for a single time step (computes intermediate states)
     controlPath.interpolate()
 
     # path to numpy array
-    # controlPath_np = ompl_utils.path_to_numpy(controlPath, state_dim=6)
     geometricPath_np = ompl_utils.path_to_numpy(geometricPath, state_dim=6)
 
-    ic(geometricPath_np)
+    print(f"Solution:\n{geometricPath_np}\n")
+    print(f"CheckedMotionCount: {si.getCheckedMotionCount()}")
+    if si.getCheckedMotionCount() == 0:
+        print(
+            ompl_utils.colorize(
+                "Warning: Nothing passed to Motion Validator!!", color="yellow"
+            )
+        )
 
     # Save the path to .txt file
     path_name = path / f"{args.env_id}_path.txt"
@@ -523,4 +651,27 @@ if __name__ == "__main__":
     # Visualize the path
     visualize_path(path_name)
 
-    # Render the path in gym environment
+    # retrive controls
+    controls = controlPath.getControls()
+
+    # ensure we have the same start position
+    env.unwrapped.wrapped_env.sim.set_state(old_sim_state)
+
+    # Render the contol path in gym environment
+    for u in controls:
+        action = np.array([u[0], u[1]])
+        qpos = env.unwrapped.wrapped_env.sim.data.qpos
+        qvel = env.unwrapped.wrapped_env.sim.data.qvel
+        # print(f"qpos: {qpos}, qvel: {qvel}")
+
+        obs, rew, done, info = env.step(action)
+        if args.render:
+            try:
+                if args.render_video:
+                    img_array = env.render(mode="rgb_array")
+                else:
+                    env.render(mode="human")
+                    time.sleep(0.5)
+            except KeyboardInterrupt:
+                break
+    env.close()
