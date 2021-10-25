@@ -8,7 +8,7 @@ from typing import Union, Optional
 from mujoco_py.cymj import PyMjModel, PyMjData  # noqa
 from mujoco_py import MjSim
 
-from irl.mujoco_ompl_py.mujoco_wrapper import getJointInfo, getCtrlRange, getCtrlInfo
+from irl.mujoco_ompl_py.mujoco_wrapper import JointInfo, StateRange, getJointInfo, getCtrlRange, getCtrlInfo
 
 try:
     from ompl import base as ob

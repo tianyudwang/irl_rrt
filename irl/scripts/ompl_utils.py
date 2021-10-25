@@ -2,13 +2,17 @@ import argparse
 import random
 import warnings
 
-from typing import Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Union
 from collections import OrderedDict
 
 import numpy as np
 from mujoco_py import MjSim
 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
 import irl.mujoco_ompl_py.mujoco_ompl_interface as mj_ompl
+from irl.mujoco_ompl_py.mujoco_wrapper import JointInfo
 
 try:
     from ompl import util as ou
@@ -38,8 +42,9 @@ color2num = dict(
     magenta=35,
     cyan=36,
     white=37,
-    crimson=38
+    crimson=38,
 )
+
 
 def colorize(string, color, bold=False, highlight=False):
     """
@@ -48,10 +53,13 @@ def colorize(string, color, bold=False, highlight=False):
     """
     attr = []
     num = color2num[color]
-    if highlight: num += 10
+    if highlight:
+        num += 10
     attr.append(str(num))
-    if bold: attr.append('1')
-    return '\x1b[%sm%s\x1b[0m' % (';'.join(attr), string)
+    if bold:
+        attr.append("1")
+    return "\x1b[%sm%s\x1b[0m" % (";".join(attr), string)
+
 
 def setLogLevel(level: int) -> None:
     """Set the log leve"""
@@ -205,38 +213,35 @@ def init_planning(sim: MjSim, param: Dict[str, Any]):
 
 
 def plan(
-    ss: ob.SpaceInformation, runtime: float, state_dim: int
+    ss: ob.SpaceInformation, runtime: float
 ) -> Tuple[oc.PathControl, og.PathGeometric, np.ndarray]:
     """Attempt to solve the problem"""
-    assert isinstance(state_dim, int)
-
     solved = ss.solve(runtime)
     controlPath = None
-    controlPath_np = None
     geometricPath = None
-    geometricPath_np = None
     if solved:
-        # Print the path to screen
+        # each row also contains the controls and control duration needed to reach the state
+        # in this row starting from the state in the previous row
+        # (the controls and duration in the first row are all zeros).
         controlPath = ss.getSolutionPath()
-        controlPath.interpolate()
-
+        # the matrix consists of all the states along the path, one per row.
         geometricPath = controlPath.asGeometric()
-        # geometricPath.interpolate()
 
-        geometricPath_np = np.fromstring(
-            geometricPath.printAsMatrix(), dtype=float, sep="\n"
-        ).reshape(
-            -1,
-        )
-        # print("Found solution:\n%s" % path)
+        # To visualize the path,
+        # In the case of ompl::control::PathControl,
+        # you may want to convert the path first to a geometric path.
+        # This conversion automatically interpolates the path at the propagation step size.
     else:
         print("No solution found")
-    return controlPath, geometricPath, geometricPath_np
+    return controlPath, geometricPath
 
 
-def angle_normalize(x) -> float:
-    """Converts angles outside of +/-PI to +/-PI"""
-    return ((x + np.pi) % (2 * np.pi)) - np.pi
+def path_to_numpy(path: Union[og.PathGeometric], state_dim: int) -> np.ndarray:
+    """Convert OMPL path to numpy array"""
+    assert isinstance(state_dim, int)
+    return np.fromstring(path.printAsMatrix(), dtype=float, sep="\n").reshape(
+        -1, state_dim
+    )
 
 
 def make_RealVectorBounds(bounds_dim: int, low, high) -> ob.RealVectorBounds:
@@ -321,6 +326,14 @@ def printSubspaceInfo(
 
     return space_dict
 
+
+def printJointInfo(joints: List[Any], title: str = "") -> None:
+    print(f"\n{title}")
+    for obj in joints:
+        print(f"  {obj}")
+
+def angle_normalize(x):
+    return ((x + np.pi) % (2 * np.pi)) - np.pi
 
 def CLI():
     parser = argparse.ArgumentParser(description="OMPL Control planning")

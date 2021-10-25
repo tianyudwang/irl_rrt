@@ -70,11 +70,58 @@ def visualize_maze(env_id: str):
         except KeyboardInterrupt:
             break
 
-def print_state(state: ob.State, loc: str = "") -> None:
-        print(loc)
-        print(
-            f"  State: {[state[0].getX(), state[0].getY(), state[0].getYaw(), state[1][0], state[1][1], state[1][2]]}"
+
+def print_state(state: ob.State, loc: str = "", color: str = "blue") -> None:
+    print(ompl_utils.colorize(loc, color))
+    print(
+        ompl_utils.colorize(
+            f"  State: {[state[0].getX(), state[0].getY(), state[0].getYaw(), state[1][0], state[1][1], state[1][2]]}\n",
+            color,
         )
+    )
+
+
+def find_invalid_states(
+    state: ob.State, bounds_low: list, bounds_high: list
+) -> ob.State:
+    assert len(bounds_low) == len(bounds_high)
+    SE2_state, v_state = state[0], state[1]
+
+    i = []
+    print_state(state, "Checking state:", color="blue")
+    if not (bounds_low[0] <= SE2_state.getX() <= bounds_high[0]):
+        i.append(0)
+    if not (bounds_low[1] <= SE2_state.getY() <= bounds_high[1]):
+        i.append(1)
+    if not (bounds_low[2] <= SE2_state.getYaw() <= bounds_high[2]):
+        i.append(2)
+    if not (bounds_low[3] <= v_state[0] <= bounds_high[3]):
+        i.append(3)
+    if not (bounds_low[4] <= v_state[1] <= bounds_high[4]):
+        i.append(4)
+    if not (bounds_low[5] <= v_state[2] <= bounds_high[5]):
+        i.append(5)
+    if i:
+        print(ompl_utils.colorize(f"  invalid: {i}", "red"))
+
+
+def visualize_path(path_file: str):
+    """
+    From https://ompl.kavrakilab.org/pathVisualization.html
+    """
+    data = np.loadtxt(path_file)
+    fig = plt.figure()
+    ax = plt.axes(projection="3d")
+    ax.plot(data[:, 1], data[:, 2], "o-")
+    ax.plot(
+        data[0, 1], data[0, 2], "go", markersize=10, markeredgecolor="k", label="start"
+    )
+    ax.plot(
+        data[-1, 1], data[-1, 2], "ro", markersize=10, markeredgecolor="k", label="goal"
+    )
+    plt.legend()
+    plt.show()
+
 
 """
 #idx 0   1     2    3    4
@@ -83,7 +130,7 @@ def print_state(state: ob.State, loc: str = "") -> None:
 4  ["B",  "B",  "B",  "E",  "B"],
 8  ["B",  "G",  "E",  "E",  "B"],
 12 ["B",  "B",  "B",  "B",  "B"],
-   4       0     4     8       12
+   -4      0     4     8       12
 """
 
 
@@ -108,13 +155,14 @@ class PointStateValidityChecker(ob.StateValidityChecker):
         y_pos = SE2_state.getY()
         yaw_angle = SE2_state.getYaw()
         valid = False
+
         if not self.si.satisfiesBounds(state):
-            print_state(state)
-            assert self.si.satisfiesBounds(state)
-            
+            return False
+
         # * The problem is that we define the state space as a grid of cells.
-        # * initial_qpos = [0, 0, 0]
-        # * However, the actual qpos = initial_qpos + noise Uniform [low=-0.1, high=0.1]
+        # * initial_qpos = [0, 0, 0], initial_qvel = [0, 0, 0]
+        # * However, the actual qpos = initial_qpos + noise (Uniform [low=-0.1, high=0.1])
+        # *          the actual qvel = initial_qvel + noise (standard normal * 0.1)
         # * Leading to invalid initial states (sometimes).
         if -self.noise_high <= x_pos <= 10:  # This should always be true.
             if 8 <= x_pos <= 10 and 4 <= y_pos <= 8:
@@ -125,16 +173,16 @@ class PointStateValidityChecker(ob.StateValidityChecker):
                 elif 8 <= y_pos <= 10:
                     valid = True
 
-        # Error Message for debugging.
-        if self.counter == 0 and not valid:
-            invalid_message = (
-                f"Invalid initial states: [{x_pos}, {y_pos}, {yaw_angle}]: {valid}"
-            )
-            print(ompl_utils.colorize("Error:", "red"))
-            print(ompl_utils.colorize("\t" + "*" * 100, "red"))
-            print(ompl_utils.colorize("\t" + "** " + invalid_message + " **", "red"))
-            print(ompl_utils.colorize("\t" + "*" * 100, "red"))
-            self.counter += 1
+        # # Error Message for debugging (Invalid initial states).
+        # if self.counter == 0 and not valid:
+        #     invalid_message = (
+        #         f"Invalid initial states: [{x_pos}, {y_pos}, {yaw_angle}]: {valid}"
+        #     )
+        #     print(ompl_utils.colorize("Error:", "red"))
+        #     print(ompl_utils.colorize("\t" + "*" * 100, "red"))
+        #     print(ompl_utils.colorize("\t" + "** " + invalid_message + " **", "red"))
+        #     print(ompl_utils.colorize("\t" + "*" * 100, "red"))
+        #     self.counter += 1
 
         return valid
 
@@ -166,10 +214,14 @@ class PointStatePropagator(oc.StatePropagator):
         self.agent_model = agent_model
         self.velocity_limits = velocity_limits
 
+        self.bounds_low = [-2, -2, -np.pi, -12, -12, -12]
+        self.bounds_high = [10, 10, np.pi, 12, 12, 12]
+
     def propagate(
-        self, state: ob.State, action: oc.Control, duration: float, result: ob.State
+        self, state: ob.State, control: oc.Control, duration: float, result: ob.State
     ) -> None:
 
+        assert self.si.satisfiesBounds(state), "Input state not in bounds"
         # SE2_state: qpos = [x, y, Yaw]
         SE2_state = state[0]
         # V_state: qvel = [vx, vy, w]
@@ -178,21 +230,25 @@ class PointStatePropagator(oc.StatePropagator):
         qpos = np.array([SE2_state.getX(), SE2_state.getY(), SE2_state.getYaw()])
         qvel = np.array([V_state[0], V_state[1], V_state[2]])
 
-        qpos[2] += action[1]
-
+        qpos[2] += control[1] 
+        
         # Clip orientation
-        if qpos[2] < -np.pi:
-            qpos[2] += np.pi * 2
-        elif np.pi < qpos[2]:
-            qpos[2] -= np.pi * 2
+        # ! deperacated : a single clip can not constrain the angle larger than 3 pi
+        # if qpos[2] < -np.pi:
+        #     qpos[2] += np.pi * 2
+        # elif np.pi < qpos[2]:
+        #     qpos[2] -= np.pi * 2
+        qpos[2] = ompl_utils.angle_normalize(qpos[2])
         ori = qpos[2]
-
+        assert (-np.pi <= ori <= np.pi)
+        
         # Compute increment in each direction
-        qpos[0] += np.cos(ori) * action[0]
-        qpos[1] += np.sin(ori) * action[0]
+        qpos[0] += np.cos(ori) * control[0]
+        qpos[1] += np.sin(ori) * control[0]
 
+        # I change cbound range between [-10, 10] instead of clipping.
         # Clip velocity  #? This is contradict to the control range
-        qvel = np.clip(qvel, -self.velocity_limits, self.velocity_limits)
+        # qvel = np.clip(qvel, -self.velocity_limits, self.velocity_limits)
 
         self.agent_model.set_state(qpos, qvel)
         for _ in range(0, self.agent_model.frame_skip):
@@ -211,27 +267,21 @@ class PointStatePropagator(oc.StatePropagator):
         result[1][1] = next_obs[4]
         result[1][2] = next_obs[5]
 
-        # assert self.si.satisfiesBounds(result)
         if not self.si.satisfiesBounds(result):
-            print_state(result)
+            print_state(result, loc="\nIn StatePropagator", color='red')
+            find_invalid_states(result, bounds_low=self.bounds_low, bounds_high=self.bounds_high)
 
-        # ? Can try this part instead of clip angle
-        # # * This part is doing the angle normalization
-        # SO2 = ob.SO2StateSpace()
-        # SO2.enforceBounds(result[2])
-
-    
     # def sim_duration(self, duration: float) -> None:
     #     steps: int = np.ceil(duration / self.max_timestep)
     #     self.sim.model.opt.timestep = duration / steps
     #     for _ in range(steps):
     #         self.sim.step()
 
-    # def canPropagateBackward(self) -> bool:
-    #     return False
+    def canPropagateBackward(self) -> bool:
+        return False
 
-    # def canSteer(self) -> bool:
-    #     return False
+    def canSteer(self) -> bool:
+        return False
 
 
 if __name__ == "__main__":
@@ -257,11 +307,6 @@ if __name__ == "__main__":
     # Initialize the environment
     env.reset()
 
-    # Observation Space and Action Space
-    obs_space, act_space = env.observation_space, env.action_space
-    obs_low, obs_high = obs_space.low, obs_space.high
-    act_low, act_high = act_space.low, act_space.high
-
     # Visualize the maze
     if args.visual:
         visualize_maze(args.env_id)
@@ -282,15 +327,17 @@ if __name__ == "__main__":
     # Raw Ctrl Info
     ctrls = mj_ompl.getCtrlInfo(m)
     if args.verbose:
+        print(ompl_utils.colorize("-" * 120, color="magenta"))
         printEnvSpace(env)
-        print(joints)
-        print(ctrls)
+        print(ompl_utils.colorize("-" * 120, color="magenta"))
+        ompl_utils.printJointInfo(joints, title="Joint Info:")
+        ompl_utils.printJointInfo(ctrls, title="Ctrls Info:")
+        print(ompl_utils.colorize("-" * 120, color="magenta"))
 
     # Extract the relevant information from the environment
-    # * I'm using the reference from env to prevent the copy
     maze_env = env.unwrapped
     maze_task = env.unwrapped._task
-    agent_model = env.unwrapped.wrapped_env
+    # agent_model = env.unwrapped.wrapped_env
 
     # Get the maze structure
     maze_structure = env.unwrapped._maze_structure
@@ -332,19 +379,22 @@ if __name__ == "__main__":
     }
     ic(maze_env_config)
 
+    VELOCITY_LIMITS = env.unwrapped.wrapped_env.VELOCITY_LIMITS
     PointEnv_config = {
         # C++ don't recognize numpy array change to list
-        "obs_high": obs_high.tolist(),
-        "obs_low": obs_low.tolist(),
-        "act_high": act_high.tolist(),
-        "act_low": act_low.tolist(),
-        "velocity_limits": agent_model.VELOCITY_LIMITS,  # 10.0
+        "obs_high": env.observation_space.high.tolist(),
+        "obs_low": env.observation_space.low.tolist(),
+        "act_high": env.action_space.high.tolist(),
+        "act_low": env.action_space.low.tolist(),
+        "velocity_limits": VELOCITY_LIMITS,  # 10.0
+        "c_bounds_low": [-VELOCITY_LIMITS, -VELOCITY_LIMITS],
+        "c_bounds_high": [VELOCITY_LIMITS, VELOCITY_LIMITS],
     }
 
     if args.dummy_setup:
         # This is a dummy setup for ease of congfiguration
         dummy_space = mj_ompl.createSpaceInformation(
-            m=agent_model.sim.model,
+            m=env.unwrapped.wrapped_env.sim.model,
             include_velocity=True,
         ).getStateSpace()
         if dummy_space.isCompound():
@@ -354,7 +404,9 @@ if __name__ == "__main__":
     # SE2 = R^2 + SO2. Should not set the bound for SO2 since it is enfored automatically.
     SE2_space = ob.SE2StateSpace()
     SE2_bounds = ompl_utils.make_RealVectorBounds(
-        bounds_dim=2, low=obs_low[:2], high=obs_high[:2]
+        bounds_dim=2,
+        low=PointEnv_config["obs_low"][:2],
+        high=PointEnv_config["obs_high"][:2],
     )
     SE2_space.setBounds(SE2_bounds)
     # print("Bounds Info:")
@@ -363,7 +415,9 @@ if __name__ == "__main__":
     # velocity space.
     velocity_space = ob.RealVectorStateSpace(3)
     v_bounds = ompl_utils.make_RealVectorBounds(
-        bounds_dim=3, low=obs_low[3:-1], high=obs_high[3:-1]
+        bounds_dim=3,
+        low=PointEnv_config["obs_low"][3:-1],
+        high=PointEnv_config["obs_high"][3:-1],
     )
     velocity_space.setBounds(v_bounds)
     # ompl_utils.printBounds(v_bounds, title="Velocity bounds")
@@ -379,7 +433,9 @@ if __name__ == "__main__":
     # Create a control space and set the bounds for the control space
     cspace = oc.RealVectorControlSpace(space, 2)
     c_bounds = ompl_utils.make_RealVectorBounds(
-        bounds_dim=2, low=act_low, high=act_high
+        bounds_dim=2,
+        low=PointEnv_config["c_bounds_low"],
+        high=PointEnv_config["c_bounds_high"],
     )
     cspace.setBounds(c_bounds)
     # ompl_utils.printBounds(c_bounds, title="Control bounds")
@@ -398,7 +454,8 @@ if __name__ == "__main__":
     ss = oc.SimpleSetup(cspace)
 
     # Set the start and goal states with threshold
-    ss.setStartAndGoalStates(start, goal, maze_env_config["goal_threshold"])
+    # ss.setStartAndGoalStates(start, goal, maze_env_config["goal_threshold"])
+    ss.setStartAndGoalStates(start, goal, 0.05)
 
     # retrieve the Space Information from the SimpleSetup
     si = ss.getSpaceInformation()
@@ -409,13 +466,15 @@ if __name__ == "__main__":
 
     # State propagator
     propagator = PointStatePropagator(
-        si, agent_model, velocity_limits=PointEnv_config["velocity_limits"]
+        si,
+        env.unwrapped.wrapped_env,
+        velocity_limits=PointEnv_config["velocity_limits"],
     )
     ss.setStatePropagator(propagator)
 
     # Set propagator step size
     si.setPropagationStepSize(
-        agent_model.sim.model.opt.timestep
+        env.unwrapped.wrapped_env.sim.model.opt.timestep
     )  # deafult 0.05, 0.02 in Mujoco
 
     # Allocate and set the planner to the SimpleSetup
@@ -431,15 +490,37 @@ if __name__ == "__main__":
             - Check if the start state is in bounds
             - Check if the start state in stateValidityChecker.isvalid()
             - CHeck the state valid condition
+        (2)  bounds not satisfied in propogator.propagate()
+            - Check if there is a clip in control during the calculation. (should enforce it as the cbounds)
+            - ompl check first state and call propagate() first and then pass to isValid()
+                It is OK that `result` state is not in bounds. It will be invalid in stateValidityChecker.isvalid()
+            - one loop wrap angle cannot properly warp the angle > abs(3* pi) 
     """
 
     if space.isCompound():
-        ompl_utils.printSubspaceInfo(
+        print(ompl_utils.colorize("-" * 120, color="magenta"))
+        space_dict = ompl_utils.printSubspaceInfo(
             space, maze_env_config["start"], include_velocity=True
         )
-        print()    
-    
-    # Plan
-    controlPath, _, _ = ompl_utils.plan(ss, args.runtime, state_dim=6)
+        print(ompl_utils.colorize("-" * 120, color="magenta"))
 
-    
+    # Plan
+    controlPath, geometricPath = ompl_utils.plan(ss, args.runtime)
+
+    controlPath.interpolate()
+
+    # path to numpy array
+    # controlPath_np = ompl_utils.path_to_numpy(controlPath, state_dim=6)
+    geometricPath_np = ompl_utils.path_to_numpy(geometricPath, state_dim=6)
+
+    ic(geometricPath_np)
+
+    # Save the path to .txt file
+    path_name = path / f"{args.env_id}_path.txt"
+    with open(str(path_name), "w") as f:
+        f.write(geometricPath.printAsMatrix())
+
+    # Visualize the path
+    visualize_path(path_name)
+
+    # Render the path in gym environment
