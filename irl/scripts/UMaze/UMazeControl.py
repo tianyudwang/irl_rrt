@@ -2,8 +2,7 @@ import sys
 import os
 import time
 import pathlib
-from gym.envs.registration import make
-
+import math
 import yaml
 
 import numpy as np
@@ -131,6 +130,12 @@ def visualize_path(path_file: str, goal=[0, 8]):
     ax.plot(
         goal[0], goal[1], "bo", markersize=10, markeredgecolor="k", label="desired goal"
     )
+
+    # Grid
+    UMaze_x = [-2, 10, 10, -2, -2, 6, 6, -2, -2, -2]
+    UMaze_y = [-2, -2, 10, 10, 6, 6, 2, 2, 2, -2]
+    ax.plot(UMaze_x, UMaze_y, "r")
+
     plt.xlim(-4, 12)
     plt.ylim(-4, 12)
     plt.legend()
@@ -148,8 +153,8 @@ def makeStateSpace(
     SE2_space = ob.SE2StateSpace()
     SE2_bounds = ompl_utils.make_RealVectorBounds(
         bounds_dim=2,
-        low=param["obs_low"][:2],
-        high=param["obs_high"][:2],
+        low=param["qpos_low"],
+        high=param["qpos_high"],
     )
     SE2_space.setBounds(SE2_bounds)
 
@@ -157,8 +162,8 @@ def makeStateSpace(
     velocity_space = ob.RealVectorStateSpace(3)
     v_bounds = ompl_utils.make_RealVectorBounds(
         bounds_dim=3,
-        low=param["obs_low"][3:-1],
-        high=param["obs_high"][3:-1],
+        low=param["qvel_low"],
+        high=param["qvel_high"],
     )
     velocity_space.setBounds(v_bounds)
 
@@ -222,18 +227,11 @@ def makeGoalState(space: ob.StateSpace, pos: np.ndarray) -> ob.State:
     return goal
 
 
-"""
-#idx 0   1     2    3    4
--4 ["B",  "B",  "B",  "B",  "B"],
-0  ["B",  "R",  "E",  "E",  "B"],
-4  ["B",  "B",  "B",  "E",  "B"],
-8  ["B",  "E",  "E",  "E",  "B"],
-12 ["B",  "B",  "B",  "B",  "B"],
-   -4      0     4     8       12
-"""
-
-
 class MazeGoal(ob.Goal):
+    """
+    An OMPL Goal that satisfy when euclidean dist between state and goal under a threshold
+    """
+
     def __init__(self, si: oc.SpaceInformation, goal: np.ndarray, threshold: float):
         super().__init__(si)
         assert goal.ndim == 1
@@ -253,7 +251,7 @@ class MazeGoal(ob.Goal):
 
     def euc_dist(self, state: np.ndarray) -> float:
         assert len(state) == 2
-        return np.sum(np.square(state - self.goal[:2])) ** 0.5
+        return np.sum((state - self.goal[:2]) ** 2) ** 0.5
 
 
 class PointStateValidityChecker(ob.StateValidityChecker):
@@ -263,8 +261,8 @@ class PointStateValidityChecker(ob.StateValidityChecker):
     ):
         super().__init__(si)
         self.si = si
+        self.size = 0.5
         self.counter = 0
-        self.noise_high = 0.1
 
     def isValid(self, state: ob.State) -> bool:
 
@@ -273,29 +271,29 @@ class PointStateValidityChecker(ob.StateValidityChecker):
 
         x_pos = SE2_state.getX()
         y_pos = SE2_state.getY()
-        yaw_angle = SE2_state.getYaw()
-        if not (-np.pi <= yaw_angle <= np.pi):
-            ic(yaw_angle)
-            assert False
-        valid = False
-        
-        # state out of bounds
-        if not self.si.satisfiesBounds(state):
-            return False
 
-        # * The problem is that we define the state space as a grid of cells.
-        # * initial_qpos = [0, 0, 0], initial_qvel = [0, 0, 0]
-        # * However, the actual qpos = initial_qpos + noise (Uniform [low=-0.1, high=0.1])
-        # *          the actual qvel = initial_qvel + noise (standard normal * 0.1)
-        # * Leading to invalid initial states (sometimes).
-        if -self.noise_high <= x_pos <= 10:
-            if 8 <= x_pos <= 10 and 4 <= y_pos <= 8:
-                valid = True
+        # In big square contains U with point size constrained
+        inSquare = all(
+            [
+                -2 + self.size <= x_pos <= 10 - self.size,
+                -2 + self.size <= y_pos <= 10 - self.size,
+            ]
+        )
+        if inSquare:
+            # In the middle block cells
+            inMidBlock = all(
+                [-2 <= x_pos <= 6 + self.size, 2 - self.size <= y_pos <= 6 + self.size]
+            )
+            if inMidBlock:
+                valid = False
             else:
-                if -self.noise_high <= y_pos <= 4:
-                    valid = True
-                elif 8 <= y_pos <= 10:
-                    valid = True
+                valid = True
+        # Not in big square
+        else:
+            valid = False
+
+        # Inside empty cell and satisfiedBounds
+        return valid and self.si.satisfiesBounds(state)
 
         # # Error Message for debugging (Invalid initial states).
         # if self.counter == 0 and not valid:
@@ -307,25 +305,6 @@ class PointStateValidityChecker(ob.StateValidityChecker):
         #     print(ompl_utils.colorize("\t" + "** " + invalid_message + " **", "red"))
         #     print(ompl_utils.colorize("\t" + "*" * 100, "red"))
         #     self.counter += 1
-
-        return valid
-
-
-class MotionValidator(ob.MotionValidator):
-    def __init__(self, si, collision):
-        super().__init__(si)
-        self.si = si
-        self.collision = collision
-
-    def checkMotion(self, s1: ob.State, s2: ob.State) -> bool:
-        # conver s1 and s2 to 1D numpy arrays
-        old_pos = np.array([s1[0].getX(), s1[0].getY()])
-        new_pos = np.array([s2[0].getX(), s2[0].getY()])
-
-        print("printsssssssssssssssssssssssssssssssssssssssss")
-        col = self.collision.detect(old_pos, new_pos)
-        # return col is None
-        return False
 
 
 class PointStatePropagator(oc.StatePropagator):
@@ -343,9 +322,16 @@ class PointStatePropagator(oc.StatePropagator):
         self.bounds_low = [-2, -2, -np.pi, -12, -12, -12]
         self.bounds_high = [10, 10, np.pi, 12, 12, 12]
 
+        # A placeholder for qpos and qvel in propagte function that don't waste tme on numpy creation
+        self.qpos_temp = np.empty(3)
+        self.qvel_temp = np.empty(3)
+
+        self.counter = 0
+
     def propagate(
         self, state: ob.State, control: oc.Control, duration: float, result: ob.State
     ) -> None:
+        # Control [ballx, rot]
 
         assert self.si.satisfiesBounds(state), "Input state not in bounds"
         # SE2_state: qpos = [x, y, Yaw]
@@ -353,41 +339,46 @@ class PointStatePropagator(oc.StatePropagator):
         # V_state: qvel = [vx, vy, w]
         V_state = state[1]
 
-        qpos = np.array([SE2_state.getX(), SE2_state.getY(), SE2_state.getYaw()])
-        qvel = np.array([V_state[0], V_state[1], V_state[2]])
+        self.qpos_temp[0] = SE2_state.getX()
+        self.qpos_temp[1] = SE2_state.getY()
+        self.qpos_temp[2] = SE2_state.getYaw()
 
-        qpos[2] += control[1]
+        self.qvel_temp[0] = V_state[0]
+        self.qvel_temp[1] = V_state[1]
+        self.qvel_temp[2] = V_state[2]
 
-        # Clip orientation
-        # ! deperacated : a single clip can not constrain the angle larger than 3 pi
-        # if qpos[2] < -np.pi:
-        #     qpos[2] += np.pi * 2
-        # elif np.pi < qpos[2]:
-        #     qpos[2] -= np.pi * 2
-        qpos[2] = ompl_utils.angle_normalize(qpos[2])
-        assert -np.pi <= qpos[2] <= np.pi
-        ori = qpos[2]
+        self.qpos_temp[2] + control[1]
 
+        # Normalize orientation to be in [-pi, pi], since it is SO2
+        self.qpos_temp[2] = ompl_utils.angle_normalize(self.qpos_temp[2] + control[1])
+        # assert -np.pi <= self.qpos[2] <= np.pi
+        ori = self.qpos_temp[2]
         # Compute increment in each direction
-        qpos[0] += np.cos(ori) * control[0]
-        qpos[1] += np.sin(ori) * control[0]
+        # using  math.sin/cos() calculate single number is much faster than numpy.sin/cos()
+        self.qpos_temp[0] += math.cos(ori) * control[0]
+        self.qpos_temp[1] += math.sin(ori) * control[0]
 
-        # I change cbound range between [-10, 10] instead of clipping.
-        # Clip velocity  #? This is contradict to the control range
+        # Clip velocity
+        # *I change cbound range from [-12, 12] to [-10, 10] instead of clipping.
         # qvel = np.clip(qvel, -self.velocity_limits, self.velocity_limits)
 
-        self.agent_model.set_state(qpos, qvel)
-        for _ in range(0, self.agent_model.frame_skip):
+        # copy OMPL State to Mujoco
+        self.agent_model.set_state(self.qpos_temp, self.qvel_temp)
+
+        # Sim Duration
+        for _ in range(0, self.agent_model.frame_skip):  # frame_skip=1
             self.agent_model.sim.step()
         next_obs = self.agent_model._get_obs()
 
-        # TODO: investigate duration
+        # self.sim_duration(duration)
+        # next_obs = self.agent_model._get_obs()
 
-        # yaw angle migh be out of range [-pi, pi] after several steps.
+        # Yaw angle migh be out of range [-pi, pi] after several steps.
         # Should enforced yaw angle since it should always in bounds
         next_obs[2] = ompl_utils.angle_normalize(next_obs[2])
-        assert -np.pi <= next_obs[2] <= np.pi
+        # assert -np.pi <= next_obs[2] <= np.pi
 
+        # Copy Mujoco State to OMPL
         # next SE2_state: next_qpos = [x, y, Yaw]
         result[0].setX(next_obs[0])
         result[0].setY(next_obs[1])
@@ -397,21 +388,29 @@ class PointStatePropagator(oc.StatePropagator):
         result[1][0] = next_obs[3]
         result[1][1] = next_obs[4]
         result[1][2] = next_obs[5]
-        # if not self.si.satisfiesBounds(result):
-        #     print_state(result, loc="\nIn StatePropagator", color='red')
-        #     find_invalid_states(result, bounds_low=self.bounds_low, bounds_high=self.bounds_high)
 
-    # def sim_duration(self, duration: float) -> None:
-    #     steps: int = np.ceil(duration / self.max_timestep)
-    #     self.sim.model.opt.timestep = duration / steps
-    #     for _ in range(steps):
-    #         self.sim.step()
+        if self.counter == 0:
+            ic(duration)
+            self.counter += 1
+
+    def sim_duration(self, duration: float) -> None:
+        steps: int = math.ceil(duration / self.agent_model.sim.model.opt.timestep)
+        self.agent_model.sim.model.opt.timestep = duration / steps
+        for _ in range(steps):
+            self.agent_model.sim.step()
 
     def canPropagateBackward(self) -> bool:
         return False
 
     def canSteer(self) -> bool:
         return False
+
+    def satisfiesBounds(self, state: ob.State):
+        if not self.si.satisfiesBounds(state):
+            print_state(state, loc="\nIn StatePropagator", color="red")
+            find_invalid_states(
+                state, bounds_low=self.bounds_low, bounds_high=self.bounds_high
+            )
 
 
 if __name__ == "__main__":
@@ -436,10 +435,6 @@ if __name__ == "__main__":
 
     # Initialize the environment
     env.reset()
-
-    # Visualize the maze
-    if args.visual:
-        visualize_maze(args.env_id)
 
     # Find associate the model
     if args.env_id.lower().find("point") != -1:
@@ -473,7 +468,7 @@ if __name__ == "__main__":
 
     # Get the maze structure
     maze_structure = env.unwrapped._maze_structure
-    # A human friendly maze structure representation
+    # A human friendly maze structure representation(not used!)
     structure_repr = np.array(
         [
             ["B", "B", "B", "B", "B"],
@@ -505,22 +500,22 @@ if __name__ == "__main__":
         "init_positons": list(env.unwrapped._init_positions[0]),
         "init_torso_x": env.unwrapped._init_torso_x,
         "init_torso_y": env.unwrapped._init_torso_y,
-        "xy_limits": list(
-            env.unwrapped._xy_limits()
-        ),  # equavalent to env.observation_space's low and high
+        # equavalent to env.observation_space's low and high
+        "xy_limits": list(env.unwrapped._xy_limits()),
     }
     # ic(maze_env_config)
 
     qvel_max = env.unwrapped.wrapped_env.VELOCITY_LIMITS
     PointEnv_config = {
         # C++ don't recognize numpy array change to list
-        "obs_high": env.observation_space.high.tolist(),
-        "obs_low": env.observation_space.low.tolist(),
-        "act_high": env.action_space.high.tolist(),
-        "act_low": env.action_space.low.tolist(),
+        # * not include qpos[3] since no bounds for SO2
+        "qpos_low": env.observation_space.low.tolist()[:2],
+        "qpos_high": env.observation_space.high.tolist()[:2],
+        "qvel_low": [-qvel_max, -qvel_max, -qvel_max],
+        "qvel_high": [qvel_max, qvel_max, qvel_max],
         "velocity_limits": qvel_max,  # 10.0
-        "c_bounds_low": [-qvel_max, -qvel_max],
-        "c_bounds_high": [qvel_max, qvel_max],
+        "c_bounds_low": [ctrls[0].range[0], ctrls[1].range[0]],  # [-1, -0.25]
+        "c_bounds_high": [ctrls[0].range[1], ctrls[1].range[1]],  # [1,  0.25]
     }
 
     if args.dummy_setup:
@@ -535,7 +530,8 @@ if __name__ == "__main__":
     # ===========================================================================
     # Define State Space and Control Space
     space = makeStateSpace(PointEnv_config, lock=True, verbose=args.verbose)
-    cspace = makeControlSpace(space, PointEnv_config)
+    cspace = makeControlSpace(space, PointEnv_config, verbose=True)
+
     if space.isCompound():
         print(ompl_utils.colorize("-" * 120, color="magenta"))
         space_dict = ompl_utils.printSubspaceInfo(
@@ -555,30 +551,31 @@ if __name__ == "__main__":
     # ===========================================================================
     # Set the start state and goal state
     start = makeStartState(space, maze_env_config["start"])
-    threshold = 0.05
-    # threshold = maze_env_config["goal_threshold"]
+    # threshold = 0.05
+    threshold = maze_env_config["goal_threshold"]  # in 6D
 
     if args.custom_goal:
+        # 2D Goal
         goal = MazeGoal(si, maze_env_config["goal"], threshold)
         ss.setStartState(start)
         pdef.setGoal(goal)
 
     else:
         goal = makeGoalState(space, maze_env_config["goal"])
-        # Set the start and goal states with threshold  # ? Should we use a smaller threshold?
+        # Set the start and goal states with threshold
+        #! In 8D case the threshold is based distance of all 8 dimension!!
         ss.setStartAndGoalStates(start, goal, threshold)
 
-    ic(maze_env_config["start"])
-    ic(maze_env_config["goal"])
+    print(f"Start: {maze_env_config['start']}")
+    print(f"Goal: {maze_env_config['goal']}")
     # ===========================================================================
     # Set State Validation Checker
     stateValidityChecker = PointStateValidityChecker(si)
     ss.setStateValidityChecker(stateValidityChecker)
 
-    # Set Motion Validation Checker
-    motion_valid_checker = MotionValidator(si, collision=env.unwrapped._collision)
+    # *There is no need to set Motion Validation Checker in contorl planning
     # * setMotionValidator() seems that can only be called from si
-    si.setMotionValidator(motion_valid_checker)
+    # * oc.spaceInformation.propagateWhileValid() is taking carte of coillisons
 
     # ===========================================================================
     # Set State Propagator
@@ -592,8 +589,8 @@ if __name__ == "__main__":
     # Set propagator step size
     si.setPropagationStepSize(
         env.unwrapped.wrapped_env.sim.model.opt.timestep
-    )  # deafult 0.05in ompl. 0.02 in Mujoco
-
+    )  # deafult 0.05 in ompl. 0.02 in Mujoco
+    si.setMinMaxControlDuration(minSteps=1, maxSteps=1)
     # ===========================================================================
     # Allocate and set the planner to the SimpleSetup
     planner = ompl_utils.allocateControlPlanner(si, plannerType=args.planner)
@@ -601,13 +598,6 @@ if __name__ == "__main__":
 
     # Set optimization objective
     ss.setOptimizationObjective(ob.PathLengthOptimizationObjective(si))
-
-    # is Steup?
-    print(
-        ompl_utils.colorize(f"Is spaceInformation Steup?: {si.isSetup()}", color="blue")
-    )
-    if not si.isSetup():
-        si.setup()
 
     # ===========================================================================
     """
@@ -622,7 +612,16 @@ if __name__ == "__main__":
             - ompl check first state and call propagate() first and then pass to isValid()
                 It is OK that `result` state is not in bounds. It will be invalid in stateValidityChecker.isvalid()
             - one loop wrap angle cannot properly warp the angle > abs(3* pi)
-            - Remember to check the angle after sim.step. It might be out of [-pi, pi] 
+            - Remember to check the angle after sim.step. It might be out of [-pi, pi].
+                Enforce it to be bounds if it is a SO2 state. Otherwise, isVlaid will take care of the rest of them.
+        (3) MotionValidator not working
+            - There is a propagateWhileValid() which calls isValid() and propagate() alternatively.
+            - This function stop if a collision is found and return the previous number of steps,
+                which actually performed without collison.
+            - Since the propagatorStepSize is relatively small.
+            This should be good enough to ensure the motion is valid.
+        (4) Propagate Duration
+            - Sync the duration with num of mujoco sim step 
     """
 
     # Plan
@@ -634,14 +633,8 @@ if __name__ == "__main__":
     # path to numpy array
     geometricPath_np = ompl_utils.path_to_numpy(geometricPath, state_dim=6)
 
-    print(f"Solution:\n{geometricPath_np}\n")
-    print(f"CheckedMotionCount: {si.getCheckedMotionCount()}")
-    if si.getCheckedMotionCount() == 0:
-        print(
-            ompl_utils.colorize(
-                "Warning: Nothing passed to Motion Validator!!", color="yellow"
-            )
-        )
+    if args.verbose:
+        print(f"Solution:\n{geometricPath_np}\n")
 
     # Save the path to .txt file
     path_name = path / f"{args.env_id}_path.txt"
@@ -652,20 +645,24 @@ if __name__ == "__main__":
     visualize_path(path_name)
 
     # retrive controls
-    controls = controlPath.getControls()
+    ompl_controls = controlPath.getControls()
+    control_count = controlPath.getControlCount()
 
-    # ensure we have the same start position
+    # Ensure we have the same start position
     env.unwrapped.wrapped_env.sim.set_state(old_sim_state)
 
+    controls = np.asarray([[u[0], u[1]] for u in ompl_controls])
+    ic(controls.shape)
+
+    confrim_render = input("Do you want to render the environment ([y]/n)? ")
     # Render the contol path in gym environment
     for u in controls:
-        action = np.array([u[0], u[1]])
         qpos = env.unwrapped.wrapped_env.sim.data.qpos
         qvel = env.unwrapped.wrapped_env.sim.data.qvel
         # print(f"qpos: {qpos}, qvel: {qvel}")
 
-        obs, rew, done, info = env.step(action)
-        if args.render:
+        obs, rew, done, info = env.step(u)
+        if args.render and confrim_render.lower() == "y":
             try:
                 if args.render_video:
                     img_array = env.render(mode="rgb_array")
@@ -674,4 +671,7 @@ if __name__ == "__main__":
                     time.sleep(0.5)
             except KeyboardInterrupt:
                 break
+        if done:
+            print(ompl_utils.colorize("Reach Goal. Success!!", color="green"))
+            break
     env.close()

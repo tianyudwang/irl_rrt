@@ -220,6 +220,13 @@ def plan(
     controlPath = None
     geometricPath = None
     if solved:
+        if solved.getStatus() == ob.PlannerStatus.APPROXIMATE_SOLUTION:
+            print(colorize("Solution is approximate!", color="yellow"))
+
+        elif solved.getStatus() == ob.PlannerStatus.EXACT_SOLUTION:
+            print(colorize("Solution is exact!", color="blue"))
+        else:
+            print(colorize(solved.getStatus(), color="red"))
         # each row also contains the controls and control duration needed to reach the state
         # in this row starting from the state in the previous row
         # (the controls and duration in the first row are all zeros).
@@ -333,8 +340,10 @@ def printJointInfo(joints: List[Any], title: str = "") -> None:
     for obj in joints:
         print(f"  {obj}")
 
+
 def angle_normalize(x):
     return ((x + np.pi) % (2 * np.pi)) - np.pi
+
 
 def CLI():
     parser = argparse.ArgumentParser(description="OMPL Control planning")
@@ -373,9 +382,7 @@ def CLI():
     parser.add_argument(
         "--render", "-r", help="Render environment", action="store_true"
     )
-    parser.add_argument(
-        "--visual", "-v", help="visulaize environment", action="store_true"
-    )
+
     parser.add_argument(
         "--dummy_setup",
         "-d",
@@ -386,8 +393,15 @@ def CLI():
         "--verbose", help="Print additional information", action="store_true"
     )
     parser.add_argument(
-        "--custom_goal", '-g', help="Define a custom goal state", action="store_true"
+        "--custom_goal", "-g", help="Define a custom goal state", action="store_true"
     )
     parser.add_argument("--render_video", "-rv", help="Save a gif", action="store_true")
+
     args = parser.parse_args()
+    # Check that time is positive
+    if args.runtime <= 0:
+        raise argparse.ArgumentTypeError(
+            "argument -t/--runtime: invalid choice: %r (choose a positive number greater than 0)"
+            % (args.runtime,)
+        )
     return args
