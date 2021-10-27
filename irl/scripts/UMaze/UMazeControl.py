@@ -246,19 +246,6 @@ class MazeGoal(ob.Goal):
         SE2_state = state[0]
         x, y = SE2_state.getX(), SE2_state.getY()
         return np.linalg.norm(self.goal - np.array([x, y])) < self.threshold
-    # def isSatisfied(self, state: ob.State, distance: float) -> bool:
-    # def isSatisfied(self, state: ob.State) -> bool:
-    #     """
-    #     Check if the state is the goal.
-    #     """
-    #     SE2_state = state[0]
-    #     x, y = SE2_state.getX(), SE2_state.getY()
-    #     euclidean_dist = self.euc_dist(np.array([x, y]))
-    #     return euclidean_dist <= self.threshold
-
-    # def euc_dist(self, state: np.ndarray) -> float:
-    #     assert len(state) == 2
-    #     return np.sum((state - self.goal[:2]) ** 2) ** 0.5
 
 
 class PointStateValidityChecker(ob.StateValidityChecker):
@@ -281,13 +268,16 @@ class PointStateValidityChecker(ob.StateValidityChecker):
 
         # In big square contains U with point size constrained
         inSquare = all(
-            [-2+self.size <= x_pos <= 10-self.size,
-             -2 + self.size <= y_pos <= 10-self.size])
+            [
+                -2 + self.size <= x_pos <= 10 - self.size,
+                -2 + self.size <= y_pos <= 10 - self.size,
+            ]
+        )
         if inSquare:
             # In the middle block cells
             inMidBlock = all(
-                [-2 <= x_pos <= 6+self.size, 
-                 2-self.size <= y_pos <= 6+self.size])
+                [-2 <= x_pos <= 6 + self.size, 2 - self.size <= y_pos <= 6 + self.size]
+            )
             if inMidBlock:
                 valid = False
             else:
@@ -351,14 +341,12 @@ class PointStatePropagator(oc.StatePropagator):
         self.qvel_temp[1] = V_state[1]
         self.qvel_temp[2] = V_state[2]
 
-        # self.qpos_temp[2] + control[1]
-
         # Normalize orientation to be in [-pi, pi], since it is SO2
         self.qpos_temp[2] = ompl_utils.angle_normalize(self.qpos_temp[2] + control[1])
-        # assert -np.pi <= self.qpos[2] <= np.pi
-        ori = self.qpos_temp[2]
+
         # Compute increment in each direction
         # using  math.sin/cos() calculate single number is much faster than numpy.sin/cos()
+        ori = self.qpos_temp[2]
         self.qpos_temp[0] += math.cos(ori) * control[0]
         self.qpos_temp[1] += math.sin(ori) * control[0]
 
@@ -369,27 +357,19 @@ class PointStatePropagator(oc.StatePropagator):
         # copy OMPL State to Mujoco
         self.agent_model.set_state(self.qpos_temp, self.qvel_temp)
 
-        # Sim Duration
-        # for _ in range(0, self.agent_model.frame_skip):  # frame_skip=1
-            # self.agent_model.sim.step()
-
         # assume MinMaxControlDuration = 1 and frame_skip = 1
         self.agent_model.sim.step()
         next_obs = self.agent_model._get_obs()
 
-        # self.sim_duration(duration)
-        # next_obs = self.agent_model._get_obs()
-
         # Yaw angle migh be out of range [-pi, pi] after several steps.
         # Should enforced yaw angle since it should always in bounds
         next_obs[2] = ompl_utils.angle_normalize(next_obs[2])
-        # assert -np.pi <= next_obs[2] <= np.pi
 
-        next_obs[3:] = np.clip(next_obs[3:], -self.velocity_limits, self.velocity_limits)
-        assert -np.pi <= next_obs[2] <= np.pi, "Yaw out of bounds after mj sim step"
-        assert -10 <= next_obs[3] <= 10, "x-velocity out of bounds after mj sim step"
-        assert -10 <= next_obs[4] <= 10, "y-velocity out of bounds after mj sim step"
-        assert -10 <= next_obs[5] <= 10, "yaw-velocity out of bounds after mj sim step"
+        # next_obs[3:] = np.clip(next_obs[3:], -self.velocity_limits, self.velocity_limits)
+        # assert -np.pi <= next_obs[2] <= np.pi, "Yaw out of bounds after mj sim step"
+        # assert -10 <= next_obs[3] <= 10, "x-velocity out of bounds after mj sim step"
+        # assert -10 <= next_obs[4] <= 10, "y-velocity out of bounds after mj sim step"
+        # assert -10 <= next_obs[5] <= 10, "yaw-velocity out of bounds after mj sim step"
 
         # Copy Mujoco State to OMPL
         # next SE2_state: next_qpos = [x, y, Yaw]
@@ -402,15 +382,14 @@ class PointStatePropagator(oc.StatePropagator):
         result[1][1] = next_obs[4]
         result[1][2] = next_obs[5]
 
-        # if self.counter == 0:
-        #     ic(duration)
-        #     self.counter += 1
-
-    # def sim_duration(self, duration: float) -> None:
-    #     steps: int = math.ceil(duration / self.agent_model.sim.model.opt.timestep)
-    #     self.agent_model.sim.model.opt.timestep = duration / steps
-    #     for _ in range(steps):
-    #         self.agent_model.sim.step()
+    def sim_duration(self, duration: float) -> None:
+        """
+        This function is not called in this example.
+        """
+        steps: int = math.ceil(duration / self.agent_model.sim.model.opt.timestep)
+        self.agent_model.sim.model.opt.timestep = duration / steps
+        for _ in range(steps):
+            self.agent_model.sim.step()
 
     def canPropagateBackward(self) -> bool:
         return False
@@ -425,6 +404,7 @@ class PointStatePropagator(oc.StatePropagator):
                 state, bounds_low=self.bounds_low, bounds_high=self.bounds_high
             )
 
+
 class ShortestPathObjective(ob.PathLengthOptimizationObjective):
     def __init__(self, si: oc.SpaceInformation):
         super(ShortestPathObjective, self).__init__(si)
@@ -435,6 +415,7 @@ class ShortestPathObjective(ob.PathLengthOptimizationObjective):
         # cost = np.linalg.norm([x1-x2, y1-y2])
         # return ob.Cost(cost)
         return ob.Cost(1.0)
+
 
 if __name__ == "__main__":
     args = ompl_utils.CLI()
@@ -581,7 +562,7 @@ if __name__ == "__main__":
         # 2D Goal
         goal = MazeGoal(si, maze_env_config["goal"], threshold)
         ss.setStartState(start)
-        # pdef.setGoal(goal)
+        # *keep with ss since pdef.setGoal(goal) returns a copy will not affect the planning.
         ss.setGoal(goal)
 
     else:

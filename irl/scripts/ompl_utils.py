@@ -227,6 +227,7 @@ def plan(
             print(colorize("Solution is exact!", color="blue"))
         else:
             print(colorize(solved.getStatus(), color="red"))
+
         # each row also contains the controls and control duration needed to reach the state
         # in this row starting from the state in the previous row
         # (the controls and duration in the first row are all zeros).
@@ -234,6 +235,18 @@ def plan(
         # the matrix consists of all the states along the path, one per row.
         # asGeometry() returns a path geometry (interpolation is performed and then states are copied)
         geometricPath = controlPath.asGeometric()
+
+        # Print solution Cost
+        pdef = ss.getProblemDefinition()
+        planner_name = ss.getPlanner().getName()
+        path_length = geometricPath.length()
+        cost = geometricPath.cost(pdef.getOptimizationObjective()).value()
+        print(
+            colorize(
+                f"{planner_name} found solution of path length {path_length:.4f} with an optimization objective value of {cost:.4f}",
+                color="blue",
+            )
+        )
 
         # To visualize the path,
         # In the case of ompl::control::PathControl,
@@ -375,7 +388,7 @@ def CLI():
         type=int,
         default=2,
         choices=[0, 1, 2],
-        help="(Optional) Set the OMPL log level. 0 for WARN, 1 for INFO, 2 for DEBUG. Defaults to WARN.",
+        help="(Optional) Set the OMPL log level. 0 for WARN, 1 for INFO, 2 for DEBUG. Defaults to DEBUG.",
     )
     parser.add_argument("--seed", help="Random generator seed", type=int, default=0)
     parser.add_argument("--plot", "-p", help="Render environment", action="store_true")
