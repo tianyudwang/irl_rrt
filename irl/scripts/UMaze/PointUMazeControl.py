@@ -1,3 +1,4 @@
+import argparse
 import sys
 import os
 import time
@@ -256,6 +257,23 @@ class PointStateValidityChecker(ob.StateValidityChecker):
         super().__init__(si)
         self.si = si
         self.size = 0.5
+        self.scaling = 4.0
+        self.x_limits = [-2, 10]
+        self.y_limits = [-2, 10]
+        
+        self.Umaze_x_min = self.x_limits[0] + self.size
+        self.Umaze_y_min = self.y_limits[0] + self.size
+        self.Umaze_x_max = self.x_limits[1] - self.size
+        self.Umaze_y_max = self.y_limits[1] - self.size
+        
+        '''
+        ["B", "B", "B", "B", "B"]
+        ["B", "R", "E", "E", "B"]
+        ["B", "B", "B", "E", "B"]
+        ["B", "G", "E", "E", "B"]
+        ["B", "B", "B", "B", "B"]
+        '''
+        # [-1,0,1,2,3]
         self.counter = 0
 
     def isValid(self, state: ob.State) -> bool:
@@ -269,14 +287,14 @@ class PointStateValidityChecker(ob.StateValidityChecker):
         # In big square contains U with point size constrained
         inSquare = all(
             [
-                -2 + self.size <= x_pos <= 10 - self.size,
-                -2 + self.size <= y_pos <= 10 - self.size,
+                self.Umaze_x_min <= x_pos <= self.Umaze_x_max,
+                self.Umaze_y_min <= y_pos <= self.Umaze_y_max,
             ]
         )
         if inSquare:
             # In the middle block cells
             inMidBlock = all(
-                [-2 <= x_pos <= 6 + self.size, 2 - self.size <= y_pos <= 6 + self.size]
+                [self.x_limits[0] <= x_pos <= 6 + self.size, 2 - self.size <= y_pos <= 6 + self.size]
             )
             if inMidBlock:
                 valid = False
@@ -287,7 +305,38 @@ class PointStateValidityChecker(ob.StateValidityChecker):
             valid = False
 
         # Inside empty cell and satisfiedBounds
-        return valid and self.si.satisfiesBounds(state)
+        return valid and self.si.satisfiesBounds(state)    
+    
+    # def isValid(self, state: ob.State) -> bool:
+
+    #     SE2_state = state[0]
+    #     assert isinstance(SE2_state, ob.SE2StateSpace.SE2StateInternal)
+
+    #     x_pos = SE2_state.getX()
+    #     y_pos = SE2_state.getY()
+
+    #     # In big square contains U with point size constrained
+    #     inSquare = all(
+    #         [
+    #             -2 + self.size <= x_pos <= 10 - self.size,
+    #             -2 + self.size <= y_pos <= 10 - self.size,
+    #         ]
+    #     )
+    #     if inSquare:
+    #         # In the middle block cells
+    #         inMidBlock = all(
+    #             [-2 <= x_pos <= 6 + self.size, 2 - self.size <= y_pos <= 6 + self.size]
+    #         )
+    #         if inMidBlock:
+    #             valid = False
+    #         else:
+    #             valid = True
+    #     # Not in big square
+    #     else:
+    #         valid = False
+
+    #     # Inside empty cell and satisfiedBounds
+    #     return valid and self.si.satisfiesBounds(state)
 
         # # Error Message for debugging (Invalid initial states).
         # if self.counter == 0 and not valid:
@@ -418,7 +467,23 @@ class ShortestPathObjective(ob.PathLengthOptimizationObjective):
 
 
 if __name__ == "__main__":
-    args = ompl_utils.CLI()
+    parser = ompl_utils.CLI()
+    parser.add_argument(
+        "--env_id",
+        "-env",
+        type=str,
+        help="Envriment to interact with",
+        choices=["PointUMaze-v0"],
+        default="PointUMaze-v0"
+    )
+    args = parser.parse_args()
+
+    # Check that time is positive
+    if args.runtime <= 0:
+        raise argparse.ArgumentTypeError(
+            "argument -t/--runtime: invalid choice: %r (choose a positive number greater than 0)"
+            % (args.runtime,)
+        )
     ic(args.planner)
 
     # Current directory
@@ -443,8 +508,6 @@ if __name__ == "__main__":
     # Find associate the model
     if args.env_id.lower().find("point") != -1:
         model_fullpath = path / "point.xml"
-    elif args.env_id.lower().find("ant") != -1:
-        model_fullpath = path / "ant.xml"
     else:
         raise ValueError("Unknown environment")
 
@@ -507,7 +570,7 @@ if __name__ == "__main__":
         # equavalent to env.observation_space's low and high
         "xy_limits": list(env.unwrapped._xy_limits()),
     }
-    # ic(maze_env_config)
+    ic(maze_env_config)
 
     qvel_max = env.unwrapped.wrapped_env.VELOCITY_LIMITS
     PointEnv_config = {

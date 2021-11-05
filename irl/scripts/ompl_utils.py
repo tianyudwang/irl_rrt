@@ -8,8 +8,6 @@ from collections import OrderedDict
 import numpy as np
 from mujoco_py import MjSim
 
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 
 import irl.mujoco_ompl_py.mujoco_ompl_interface as mj_ompl
 from irl.mujoco_ompl_py.mujoco_wrapper import JointInfo
@@ -257,7 +255,7 @@ def plan(
     return controlPath, geometricPath
 
 
-def path_to_numpy(path: Union[og.PathGeometric], state_dim: int) -> np.ndarray:
+def path_to_numpy(path: Union[og.PathGeometric, oc.PathControl], state_dim: int) -> np.ndarray:
     """Convert OMPL path to numpy array"""
     assert isinstance(state_dim, int)
     return np.fromstring(path.printAsMatrix(), dtype=float, sep="\n").reshape(
@@ -317,6 +315,7 @@ def printSubspaceInfo(
     space_dict = OrderedDict()
     print("\nSubspace info: ")
     last_subspace_idx = 0
+    k = 0
     for i in range(space.getSubspaceCount()):
         subspace = space.getSubspace(i)
         name = subspace.getName()
@@ -327,16 +326,20 @@ def printSubspaceInfo(
         elif isinstance(subspace, ob.SO2StateSpace):
             low, high = [[-np.pi], [np.pi]]
 
+        elif isinstance(subspace, ob.SO3StateSpace):
+            low, high = [None]*4, [None]*4       
+        
         elif isinstance(subspace, ob.SE2StateSpace):
             low, high = subspace.getBounds().low, subspace.getBounds().high
-            # SO2 bound is not inlude in bounds manually add it for visualization
+            # SO2 bound is not inluded in bounds manually add it for visualization
             low.append(-np.pi)
             high.append(np.pi)
-        if include_velocity and i == space.getSubspaceCount() / 2:
-            print("\n  Velocy State Space:")
-
+        
+        elif isinstance(subspace, ob.SE3StateSpace):
+            low, high = subspace.getBounds().low, subspace.getBounds().high
+        
         for j in range(len(low)):
-            print(f"  {i}: {name}[{j}]\t[{low[j]}, {high[j]}]")
+            print(f"  {k}|{i}: {name}[{j}]\t[{low[j]}, {high[j]}]")
             if start is not None:
                 assert low[j] <= start[i + j] <= high[j], (
                     f"start value: {start[i+j]} "
@@ -344,6 +347,7 @@ def printSubspaceInfo(
                     + f"at subspace ({i}) with inner index ({j})."
                 )
             last_subspace_idx += 1
+            k+=1
 
     return space_dict
 
@@ -358,16 +362,9 @@ def angle_normalize(x):
     return ((x + np.pi) % (2 * np.pi)) - np.pi
 
 
-def CLI():
+def CLI() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="OMPL Control planning")
-    parser.add_argument(
-        "--env_id",
-        "-env",
-        type=str,
-        help="Envriment to interact with",
-        choices=["InvertedPendulum-v2", "PointUMaze-v0", "AntUMaze-v0"],
-        required=True,
-    )
+    
     parser.add_argument(
         "-t",
         "--runtime",
@@ -403,18 +400,11 @@ def CLI():
         action="store_true",
     )
     parser.add_argument(
-        "--verbose", help="Print additional information", action="store_true"
+        "--verbose", "-v", help="Print additional information", action="store_true"
     )
     parser.add_argument(
         "--custom_goal", "-g", help="Define a custom goal state", action="store_true"
     )
     parser.add_argument("--render_video", "-rv", help="Save a gif", action="store_true")
 
-    args = parser.parse_args()
-    # Check that time is positive
-    if args.runtime <= 0:
-        raise argparse.ArgumentTypeError(
-            "argument -t/--runtime: invalid choice: %r (choose a positive number greater than 0)"
-            % (args.runtime,)
-        )
-    return args
+    return parser
