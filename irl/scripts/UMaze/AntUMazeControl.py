@@ -191,14 +191,14 @@ def makeStateSpace(
 
     # 8 dim of joint space
     # TODO: change this to SO2StateSpace
-    # joint_space = [ob.SO2StateSpace() for _ in range(8)]
-    joint_space = ob.RealVectorStateSpace(8)
-    v_bounds = ompl_utils.make_RealVectorBounds(
-        bounds_dim=8,
-        low=param["joint_bounds_low"],
-        high=param["joint_bounds_high"],
-    )
-    joint_space.setBounds(v_bounds)
+    joint_space = [ob.SO2StateSpace() for _ in range(8)]
+    # joint_space = ob.RealVectorStateSpace(8)
+    # v_bounds = ompl_utils.make_RealVectorBounds(
+    #     bounds_dim=8,
+    #     low=param["joint_bounds_low"],
+    #     high=param["joint_bounds_high"],
+    # )
+    # joint_space.setBounds(v_bounds)
 
     # qvel = velocity of {R^3 + SO3 + 8D RealVector}
     # 6 dim of SE3 + 8 dim of joint velocity, which is same as qvel.shape: (14,)
@@ -214,9 +214,9 @@ def makeStateSpace(
     # Add subspace to the compound space.
     space = ob.CompoundStateSpace()
     space.addSubspace(SE3, 1.0)
-    # for i in range(8):
-    # space.addSubspace(joint_space[i], 1.0)
-    space.addSubspace(joint_space, 1.0)
+    for i in range(8):
+        space.addSubspace(joint_space[i], 1.0)
+    # space.addSubspace(joint_space, 1.0)
     space.addSubspace(velocity_space, 1.0)
 
     # Lock this state space. This means no further spaces can be added as components.
@@ -259,6 +259,9 @@ def makeStartState(
 
     err = 0
 
+    # Quaternion q = w + xi + yj + zk
+    # Mujoco is wxyz while OMPL order is xyzw, so we swap pos[3] and pos[6]
+    pos[3], pos[6] = pos[6], pos[3]
     for i in range(len(pos)):
         if bounds_low is not None and bounds_high is not None:
             if not (bounds_low[i] <= pos[i] <= bounds_high[i]):
@@ -440,16 +443,26 @@ class AntStatePropagator(oc.StatePropagator):
 
         # Copy ompl state to qpos and qvel
         # R3 -> qpos[:3], SO3 -> qpos[3:7]
-        self.qpos_temp[:3] = state[0].getX(), state[0].getX(), state[0].getZ()
+        self.qpos_temp[:3] = state[0].getX(), state[0].getY(), state[0].getZ()
         SO3 = state[0].rotation()
-        self.qpos_temp[3:7] = SO3.w, SO3.x, SO3.y, SO3.z
+
+        if np.linalg.norm(self.qpos_temp[:2]) > 1:
+            print(state[0].getX(), state[0].getY())
+
+        # Mujoco SO3 order is wxyz
+        self.qpos_temp[3:7] = SO3.w, SO3.x, SO3.y, SO3.z 
 
         # 8 SO2 or 8 R joint space -> qpos[7:]
+        # for i in range(8):
+        #     self.qpos_temp[7 + i] = state[1][i]
+
+        # 8 SO2 -> qpos[7:15]
         for i in range(8):
-            self.qpos_temp[7 + i] = state[1][i]
+            self.qpos_temp[7+i] = state[1+i].value
 
         # 14D joint velocity(6+8) -> qvel
-        copyRealVectorState2Data(state[2], self.qvel_temp)
+        # copyRealVectorState2Data(state[2], self.qvel_temp)
+        copyRealVectorState2Data(state[9], self.qvel_temp)
         
         # copy OMPL State to Mujoco
         self.agent_model.set_state(self.qpos_temp, self.qvel_temp)
@@ -462,6 +475,7 @@ class AntStatePropagator(oc.StatePropagator):
         self.agent_model.do_simulation(
             self.action_temp, self.agent_model.frame_skip
         )  # 5
+        import pdb; pdb.set_trace()
         next_obs = self.agent_model._get_obs()
 
         # qpos = next_obs[:15]
@@ -470,8 +484,8 @@ class AntStatePropagator(oc.StatePropagator):
 
         # Copy Mujoco State back to OMPL
         # next R3 state:  [x, y, z]
-        xyz = next_obs[:3]
-        rot_xyz = next_obs[3:7]
+        # xyz = next_obs[:3]
+        # rot_xyz = next_obs[3:7]
         result[0].setXYZ(next_obs[0], next_obs[1], next_obs[2])
         result[0].rotation().w = next_obs[3]
         result[0].rotation().x = next_obs[4]
@@ -482,13 +496,15 @@ class AntStatePropagator(oc.StatePropagator):
         for k in range(8):
             assert -np.pi <= next_obs[7 + k] <= np.pi
             # result[1] is R^8 
-            result[1][k] = next_obs[7 + k]
+            # result[1][k] = next_obs[7 + k]
+            result[1+k].value = next_obs[7 + k]
 
         # next joint velocity: [J1_dot, ... J8_dot]
         for p in range(14):
             assert -10 <= next_obs[15 + p] <= 10
             # result[1] is R^14
-            result[2][p] = next_obs[15 + p]
+            # result[2][p] = next_obs[15 + p]
+            result[9][p] = next_obs[15 + p]
 
     def canPropagateBackward(self) -> bool:
         return False
@@ -502,11 +518,11 @@ class ShortestPathObjective(ob.PathLengthOptimizationObjective):
         super(ShortestPathObjective, self).__init__(si)
 
     def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
-        # x1, y1 = s1[0].getX(), s1[0].getY()
-        # x2, y2 = s2[0].getX(), s2[0].getY()
-        # cost = np.linalg.norm([x1-x2, y1-y2])
-        # return ob.Cost(cost)
-        return ob.Cost(1.0)
+        x1, y1 = s1[0].getX(), s1[0].getY()
+        x2, y2 = s2[0].getX(), s2[0].getY()
+        cost = np.linalg.norm([x1-x2, y1-y2])
+        return ob.Cost(cost)
+        # return ob.Cost(1.0)
 
 
 if __name__ == "__main__":
@@ -592,7 +608,6 @@ if __name__ == "__main__":
         "xy_limits": list(env.unwrapped._xy_limits()),
     }
     ic(maze_env_config)
-
     # ===========================================================================
     
     # These value come from the google sheet   
@@ -621,34 +636,46 @@ if __name__ == "__main__":
     v_xyz_lim = 5  # from the google sheet 
     v_rot_lim = 5  # from the google sheet 
 
+    # velocity_bounds_low = (
+    #     [-v_xyz_lim] * 3
+    #     + [-v_rot_lim] * 3
+    #     + [
+    #         -6.89239117,
+    #         -5.879475,
+    #         -6.67364948,
+    #         -8.42915348,
+    #         -7.39078628,
+    #         -8.22035854,
+    #         -6.97926868,
+    #         -5.67553833,
+    #     ]
+    # )
+
+    # velocity_bounds_high = (
+    #     [v_xyz_lim] * 3
+    #     + [v_rot_lim] * 3
+    #     + [
+    #         6.90969349,
+    #         8.08915766,
+    #         7.20420347,
+    #         5.94957346,
+    #         7.06192189,
+    #         5.87294546,
+    #         7.25147103,
+    #         7.96882337,
+    #     ]
+    # )
+
     velocity_bounds_low = (
         [-v_xyz_lim] * 3
         + [-v_rot_lim] * 3
-        + [
-            -6.89239117,
-            -5.879475,
-            -6.67364948,
-            -8.42915348,
-            -7.39078628,
-            -8.22035854,
-            -6.97926868,
-            -5.67553833,
-        ]
+        + [-10] * 8
     )
 
     velocity_bounds_high = (
         [v_xyz_lim] * 3
         + [v_rot_lim] * 3
-        + [
-            6.90969349,
-            8.08915766,
-            7.20420347,
-            5.94957346,
-            7.06192189,
-            5.87294546,
-            7.25147103,
-            7.96882337,
-        ]
+        + [10] * 8
     )
 
     AntEnv_config = {
@@ -702,7 +729,9 @@ if __name__ == "__main__":
     )
     threshold = maze_env_config["goal_threshold"]  # 0.6
     # 2D Goal
-    goal = MazeGoal(si, maze_env_config["goal"], threshold)
+    goal_pos = np.array([2.0, 0.0])
+    # goal = MazeGoal(si, maze_env_config["goal"], threshold)
+    goal = MazeGoal(si, goal_pos, threshold)
     ss.setStartState(start)
     ss.setGoal(goal)
 
@@ -722,10 +751,12 @@ if __name__ == "__main__":
 
     # Set propagator step size (0.02 in Mujoco)
     si.setPropagationStepSize(env.unwrapped.wrapped_env.sim.model.opt.timestep)
-    # si.setMinMaxControlDuration(minSteps=5, maxSteps=5)  # TODO: what should this be?
+    si.setMinMaxControlDuration(minSteps=1, maxSteps=1)  # TODO: what should this be?
     # ===========================================================================
     # Allocate and set the planner to the SimpleSetup
     planner = ompl_utils.allocateControlPlanner(si, plannerType=args.planner)
+    planner.setSelectionRadius(10.0)
+    planner.setPruningRadius(10.0)
     ss.setPlanner(planner)
 
     # Set optimization objective
