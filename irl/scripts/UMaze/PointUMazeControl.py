@@ -501,7 +501,7 @@ if __name__ == "__main__":
     # Create the environment
     env = gym.make(args.env_id)
     env.seed(args.seed)
-
+    ic(env._max_episode_steps)
     # Initialize the environment
     env.reset()
 
@@ -742,6 +742,7 @@ if __name__ == "__main__":
             except KeyboardInterrupt:
                 break
         if done:
+            ic(info)
             print(ompl_utils.colorize("Reach Goal. Success!!", color="green"))
             break
     env.close()

@@ -16,10 +16,9 @@ from mujoco_maze.agent_model import AgentModel
 
 import mujoco_py
 
-from ompl import util as ou
 from ompl import base as ob
-from ompl import geometric as og
 from ompl import control as oc
+from ompl import geometric as og
 
 from irl.scripts import ompl_utils
 import irl.mujoco_ompl_py.mujoco_ompl_interface as mj_ompl
@@ -64,30 +63,6 @@ def print_state(state: ob.State, loc: str = "", color: str = "blue") -> None:
     )
 
 
-def find_invalid_states(
-    state: ob.State, bounds_low: list, bounds_high: list
-) -> ob.State:
-    assert len(bounds_low) == len(bounds_high)
-    SE2_state, v_state = state[0], state[1]
-
-    i = []
-    print_state(state, "Checking state:", color="blue")
-    if not (bounds_low[0] <= SE2_state.getX() <= bounds_high[0]):
-        i.append(0)
-    if not (bounds_low[1] <= SE2_state.getY() <= bounds_high[1]):
-        i.append(1)
-    if not (bounds_low[2] <= SE2_state.getYaw() <= bounds_high[2]):
-        i.append(2)
-    if not (bounds_low[3] <= v_state[0] <= bounds_high[3]):
-        i.append(3)
-    if not (bounds_low[4] <= v_state[1] <= bounds_high[4]):
-        i.append(4)
-    if not (bounds_low[5] <= v_state[2] <= bounds_high[5]):
-        i.append(5)
-    if i:
-        print(ompl_utils.colorize(f"  invalid: {i}", "red"))
-
-
 def visualize_path(path_file: str, goal=[0, 16]):
     """
     From https://ompl.kavrakilab.org/pathVisualization.html
@@ -125,40 +100,6 @@ def visualize_path(path_file: str, goal=[0, 16]):
 
     plt.plot(data[:, 0], data[:, 1], "o-")
     plt.show()
-
-
-def visualize_env(env, controls, goal, threshold):
-    confrim_render = input("Do you want to render the environment ([y]/n)? ")
-    print_success = False
-
-    # Render the contol path in gym environment
-    for i, u in enumerate(controls):
-        qpos = env.unwrapped.wrapped_env.sim.data.qpos
-        qvel = env.unwrapped.wrapped_env.sim.data.qvel
-        # print(f"qpos: {qpos}, qvel: {qvel}")
-
-        obs, rew, _, info = env.step(u)
-
-        if confrim_render.lower() == "y":
-            env.render(mode="human")
-        simState = env.unwrapped.wrapped_env.sim.get_state()
-        print(ompl_utils.colorize("-" * 120, color="magenta"))
-        
-        ic(simState)
-        ic(u)
-        ic(info)
-        
-        
-        reached_goal = info["position"]
-        if np.linalg.norm(goal - reached_goal, ord=2) <= threshold:
-            print_success = True
-
-        if i == len(controls) - 1:
-            if print_success:
-                print(ompl_utils.colorize("Goal reached!", "green"))
-            else:
-                print(ompl_utils.colorize("Goal not reached!", "red"))
-    env.close()
 
 
 def makeStateSpace(
@@ -204,19 +145,18 @@ def makeStateSpace(
 
     # 8 dim of joint space
     # TODO: change this to SO2StateSpace
-    joint_space = [ob.SO2StateSpace() for _ in range(8)]
-    # joint_space = ob.RealVectorStateSpace(8)
-    # v_bounds = ompl_utils.make_RealVectorBounds(
-    #     bounds_dim=8,
-    #     low=param["joint_bounds_low"],
-    #     high=param["joint_bounds_high"],
-    # )
-    # joint_space.setBounds(v_bounds)
+    # joint_space = [ob.SO2StateSpace() for _ in range(8)]
+    joint_space = ob.RealVectorStateSpace(8)
+    v_bounds = ompl_utils.make_RealVectorBounds(
+        bounds_dim=8,
+        low=param["joint_bounds_low"],
+        high=param["joint_bounds_high"],
+    )
+    joint_space.setBounds(v_bounds)
 
     # qvel = velocity of {R^3 + SO3 + 8D RealVector}
     # 6 dim of SE3 + 8 dim of joint velocity, which is same as qvel.shape: (14,)
     velocity_space = ob.RealVectorStateSpace(14)
-    # TODO: maybe change this back
     v_bounds = ompl_utils.make_RealVectorBounds(
         bounds_dim=14,
         low=param["velocity_bounds_low"],
@@ -227,9 +167,9 @@ def makeStateSpace(
     # Add subspace to the compound space.
     space = ob.CompoundStateSpace()
     space.addSubspace(SE3, 1.0)
-    for i in range(8):
-        space.addSubspace(joint_space[i], 1.0)
-    # space.addSubspace(joint_space, 1.0)
+    # for i in range(8):
+    #     space.addSubspace(joint_space[i], 1.0)
+    space.addSubspace(joint_space, 1.0)
     space.addSubspace(velocity_space, 1.0)
 
     # Lock this state space. This means no further spaces can be added as components.
@@ -243,25 +183,6 @@ def makeStateSpace(
     return space
 
 
-def makeControlSpace(
-    state_space: ob.StateSpace, param: dict, verbose: bool = False
-) -> oc.ControlSpace:
-    """
-    Create a control space and set the bounds for the control space
-    """
-    cspace = oc.RealVectorControlSpace(state_space, 8)
-    c_bounds = ompl_utils.make_RealVectorBounds(
-        bounds_dim=8,
-        low=param["c_bounds_low"],
-        high=param["c_bounds_high"],
-    )
-    cspace.setBounds(c_bounds)
-    if verbose:
-        print("Control Bounds Info:")
-        ompl_utils.printBounds(c_bounds, title="Control bounds")
-    return cspace
-
-
 def makeStartState(
     space: ob.StateSpace, pos: np.ndarray, bounds_low=None, bounds_high=None
 ) -> ob.State:
@@ -271,23 +192,21 @@ def makeStartState(
     start = ob.State(space)
     err = []
 
-    # Quaternion q = w + xi + yj + zk
+    # * Quaternion q = w + xi + yj + zk
     # * Mujoco is [w,x,y,z] while OMPL order is [x,y,z,w], so we swap pos[3] and pos[6]
     pos_temp = pos.copy()
-    # swap pos[3] and pos[6]
     pos_temp[3], pos_temp[6] = pos_temp[6], pos_temp[3]
     for i in range(len(pos)):
         if bounds_low is not None and bounds_high is not None:
-            if not (bounds_low[i] <= pos[i] <= bounds_high[i]):
+            if not (bounds_low[i] <= pos_temp[i] <= bounds_high[i]):
                 err.append(i)
                 print(
                     ompl_utils.colorize(
-                        f"{i}: {bounds_low[i]}, {pos_temp[i]}, {bounds_high[i]}",
-                        color="red",
+                        f"{i}: {bounds_low[i]}, {pos[i]}, {bounds_high[i]}", color="red"
                     )
                 )
         start[i] = pos_temp[i]
-    assert not err == 0, f"Start state is out of bounds at index: {err}"
+    assert not err , f"Start state is out of bounds with index {err}"
 
     return start
 
@@ -304,6 +223,11 @@ def makeGoalState(space: ob.StateSpace, pos: np.ndarray) -> ob.State:
     return goal
 
 
+def copyRealVectorState2Data(state: ob.State, data):
+    for i in range(len(data)):
+        data[i] = state[i]
+
+
 def copyData2RealVectorState(data, state: ob.State):
     for i in range(len(data)):
         state[i] = data[i]
@@ -313,7 +237,7 @@ def copySO3State2Data(
     state,  # ob.SO3StateSpace,
     data,
 ) -> None:
-    # * Mujoco is [w,x,y,z] while OMPL order is [x,y,z,w]
+     # * Mujoco is [w,x,y,z] while OMPL order is [x,y,z,w],
     data[0] = state.w
     data[1] = state.x
     data[2] = state.y
@@ -324,7 +248,7 @@ def copyData2SO3State(
     data,
     state,  # ob.SO3StateSpace,
 ) -> None:
-    # * Mujoco is [w,x,y,z] while OMPL order is [x,y,z,w]
+    # * Mujoco is [w,x,y,z] while OMPL order is [x,y,z,w],
     state.w = data[0]
     state.x = data[1]
     state.y = data[2]
@@ -350,13 +274,13 @@ class MazeGoal(ob.Goal):
         # first state is R^3
         R3 = state[0]
         x, y = R3.getX(), R3.getY()
-        return np.linalg.norm(self.goal - np.array([x, y])) <= self.threshold
+        return np.linalg.norm(self.goal - np.array([x, y])) < self.threshold
 
 
 class AntStateValidityChecker(ob.StateValidityChecker):
     def __init__(
         self,
-        si: oc.SpaceInformation,
+        si,
     ):
         super().__init__(si)
         self.si = si
@@ -387,13 +311,12 @@ class AntStateValidityChecker(ob.StateValidityChecker):
             ]
         )
         if inSquare:
-            # In the middle block cells (4 is pointMaze scalling) ->  PointMaze_pos / 4 * 8 is AntMaze_pos
             inMidBlock = all(
                 [
-                    self.x_limits[0] <= x_pos <= (6 / 4 * self.scaling + self.size),
-                    (2 / 4 * self.scaling - self.size)
+                    self.x_limits[0] <= x_pos <= (12 + self.size),
+                    (4 - self.size)
                     <= y_pos
-                    <= 6 / 4 * self.scaling + self.size,
+                    <= 12 + self.size,
                 ]
             )
             if inMidBlock:
@@ -415,158 +338,6 @@ class AntStateValidityChecker(ob.StateValidityChecker):
         return valid and self.si.satisfiesBounds(state)
 
 
-class AntStatePropagator(oc.StatePropagator):
-    def __init__(
-        self, si: oc.SpaceInformation, agent_model: AgentModel, param: dict, env
-    ):
-        super().__init__(si)
-        self.si = si
-        self.agent_model = agent_model
-        self.env = env
-
-        # A placeholder for qpos, qvel and control in propagte function that don't waste time on numpy creation
-        self.qpos_temp = np.zeros(15)
-        self.qvel_temp = np.zeros(14)
-        self.action_temp = np.zeros(8)
-        
-        #
-        self.v_xyz_lim = 10  # from the google sheet
-        self.v_rot_lim = 10  # from the google sheet
-        self.v_joint_lim = 10
-
-    def propagate(
-        self, state: ob.State, control: oc.Control, duration: float, result: ob.State
-    ) -> None:
-        """
-        SE3 = qpos[:7]
-        8 SO2 = qpos[7: 15] or 8 R
-        14 R = qvel[:14]
-        """
-        assert self.si.satisfiesBounds(state), "Input state not in bounds"
-
-        assert self.agent_model.dt == 0.1
-        assert self.agent_model.frame_skip == 5
-
-        # Copy ompl state to qpos and qvel
-        # R3 -> qpos[:3], SO3 -> qpos[3:7]
-        self.qpos_temp[0] = state[0].getX()
-        self.qpos_temp[1] = state[0].getY()
-        self.qpos_temp[2] = state[0].getZ()
-
-        # Mujoco SO3 order is [w,x,y,z]
-        self.qpos_temp[3] = state[0].rotation().w
-        self.qpos_temp[4] = state[0].rotation().x
-        self.qpos_temp[5] = state[0].rotation().y
-        self.qpos_temp[6] = state[0].rotation().z
-
-        # 8 R joint space -> qpos[7:]
-        # for i in range(8):
-        #     self.qpos_temp[7 + i] = state[1][i]
-
-        # 8 SO2 -> qpos[7:15]
-        for i in range(8):
-            self.qpos_temp[7 + i] = state[1 + i].value
-
-        # 14D joint velocity(6+8) -> qvel
-        for i in range(14):
-            self.qvel_temp[i] = state[9][i]
-
-        # ========================================================
-        # old state
-        current_simState = self.agent_model.sim.get_state()
-
-        # copy OMPL State to Mujoco
-        # * self.agent_model = env.unwrapped.wrapped_env
-        self.env.unwrapped.wrapped_env.set_state(self.qpos_temp, self.qvel_temp)
-
-        # copy OMPL contorl to Mujoco (8D)
-        for i in range(self.action_temp.shape[0]):
-            self.action_temp[i] = control[i]
-
-        # # Implmentation self.do_siulation
-        # self.agent_model.do_simulation(
-        #     self.action_temp, self.agent_model.frame_skip
-        # )  # 5
-
-        # next_simState = self.agent_model.sim.get_state()
-        # next_obs = self.agent_model._get_obs()
-
-        # next_qpos = next_obs[:15]
-        # next_qvel = next_obs[15:]
-
-        # assert np.array_equal(next_simState.qpos, next_qpos)
-        # assert np.array_equal(next_simState.qvel, next_qvel)
-
-        # ic(current_simState)
-        # ic(next_simState)
-        # # ic(next_qpos, next_qvel)
-        # print(ompl_utils.colorize("=" * 150, "red"))
-
-        # reset sim State
-        old_simState = mujoco_py.MjSimState(
-            current_simState.time,
-            current_simState.qpos,
-            current_simState.qvel,
-            current_simState.act,
-            current_simState.udd_state,
-        )
-        self.env.unwrapped.wrapped_env.sim.set_state(old_simState)
-        self.env.unwrapped.wrapped_env.sim.forward()
-
-        next_env_obs, *_ = self.env.step(self.action_temp)
-        next_env_obs = next_env_obs[:-1]
-
-        # next_env_simState = self.agent_model.sim.get_state()
-        # next_env_obs = self.agent_model._get_obs()
-        # next_env_qpos = next_env_obs[:15]
-        # next_env_qvel = next_env_obs[15:]
-        # ic(old_simState)
-        # ic(next_env_simState)
-        # assert np.array_equal(next_env_simState.qpos, next_env_qpos)
-        # assert np.array_equal(next_env_simState.qvel, next_env_qvel)
-        # assert np.array_equal(next_qpos, next_env_qpos)
-        # assert np.array_equal(next_qvel, next_env_qvel)
-        # import ipdb; ipdb.set_trace()
-        next_obs = next_env_obs
-
-        next_env_qpos = next_env_obs[:15]
-        next_env_qvel = next_env_obs[15:]
-        
-        # Copy Mujoco State back to OMPL
-        # next R3 state:  [x, y, z], SO3:[w, x, y, z]
-        result[0].setXYZ(next_obs[0], next_obs[1], next_obs[2])
-        result[0].rotation().w = next_obs[3]
-        result[0].rotation().x = next_obs[4]
-        result[0].rotation().y = next_obs[5]
-        result[0].rotation().z = next_obs[6]
-
-        # next joint state: [J1, ..., J8]
-        for k in range(8):
-            assert -np.pi <= next_obs[7 + k] <= np.pi
-            # result[1] is R^8
-            # result[1][k] = next_obs[7 + k]
-            result[1 + k].value = next_obs[7 + k]
-
-        # ic(next_obs[15:])
-        # next joint velocity: [J1_dot, ... J8_dot]
-        for p in range(14):
-            if p < 3:
-                assert -self.v_xyz_lim <= next_obs[15 + p] <= self.v_xyz_lim
-            elif 3 <= p < 6:
-                assert -self.v_rot_lim <= next_obs[15 + p] <= self.v_rot_lim, f"{p}: {next_obs[15 + p]}"
-            else:
-                assert -self.v_joint_lim <= next_obs[15 + p] <= self.v_joint_lim
-            # result[1] is R^14
-            # result[2][p] = next_obs[15 + p]
-            result[9][p] = next_obs[15 + p]
-
-    def canPropagateBackward(self) -> bool:
-        return False
-
-    def canSteer(self) -> bool:
-        return False
-
-
 class ShortestPathObjective(ob.PathLengthOptimizationObjective):
     def __init__(self, si: oc.SpaceInformation):
         super(ShortestPathObjective, self).__init__(si)
@@ -574,7 +345,7 @@ class ShortestPathObjective(ob.PathLengthOptimizationObjective):
     def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
         x1, y1 = s1[0].getX(), s1[0].getY()
         x2, y2 = s2[0].getX(), s2[0].getY()
-        cost = np.linalg.norm([x1 - x2, y1 - y2])
+        cost = np.linalg.norm([x1-x2, y1-y2])
         return ob.Cost(cost)
         # return ob.Cost(1.0)
 
@@ -663,9 +434,9 @@ if __name__ == "__main__":
     }
     ic(maze_env_config)
     # ===========================================================================
-
-    # These value come from the google sheet
-
+    
+    # These value come from the google sheet   
+    
     joint_bounds_low = [
         -0.64287,
         -0.09996,
@@ -687,19 +458,25 @@ if __name__ == "__main__":
         1.3297,
     ]
 
-    v_xyz_lim = 5  # from the google sheet
-    v_rot_lim = 5  # from the google sheet
-    v_joint_lim = 10
+    v_xyz_lim = 5  # from the google sheet 
+    v_rot_lim = 5  # from the google sheet 
+    v_joint_lim = 5  
+    velocity_bounds_low = (
+        [-v_xyz_lim] * 3
+        + [-v_rot_lim] * 3
+        + [-v_joint_lim] * 8
+    )
 
-    velocity_bounds_low = [-v_xyz_lim] * 3 + [-v_rot_lim] * 3 + [-v_joint_lim] * 8
-
-    velocity_bounds_high = [v_xyz_lim] * 3 + [v_rot_lim] * 3 + [v_joint_lim] * 8
+    velocity_bounds_high = (
+        [v_xyz_lim] * 3
+        + [v_rot_lim] * 3
+        + [v_joint_lim] * 8
+    )
 
     AntEnv_config = {
         # First Joint is Free -> SE3 = R^3 + SO3
-        "R3_low": [-4, -4, 0.25],  # min z takes from radius of the free joint(0.25)
-        "R3_high": [20, 20, 3],
-        # initial z pos is 0.75 # ? does z axis affect the torso?
+        "R3_low": [-4, -4, 0.25], # min z takes from radius of the free joint(0.25)
+        "R3_high": [20, 20, 1],   # initial z pos is 0.75
         # Rest of Joints (exclude the first free joint)
         "joint_bounds_low": joint_bounds_low,
         "joint_bounds_high": joint_bounds_high,
@@ -710,24 +487,11 @@ if __name__ == "__main__":
         "c_bounds_low": [ctrl.range[0] for ctrl in ctrls],
         "c_bounds_high": [ctrl.range[1] for ctrl in ctrls],
     }
-    # check_start_bounds_low = np.full(29, -float("inf"))
-    # check_start_bounds_high = np.full(29, float("inf"))
-
-    # check_start_bounds_low[:3] = AntEnv_config["R3_low"]
-    # check_start_bounds_high[:3] = AntEnv_config["R3_high"]
-    # check_start_bounds_low[7 : 7 + 8] = AntEnv_config["joint_bounds_low"]
-    # check_start_bounds_high[7 : 7 + 8] = AntEnv_config["joint_bounds_high"]
-    # check_start_bounds_low[15:] = AntEnv_config["velocity_bounds_low"]
-    # check_start_bounds_high[15:] = AntEnv_config["velocity_bounds_high"]
-    # AntEnv_config["bounds_low"] = check_start_bounds_low
-    # AntEnv_config["bounds_high"] = check_start_bounds_high
-
     ic(AntEnv_config)
 
     # ===========================================================================
     # Define State Space and Control Space
     space = makeStateSpace(AntEnv_config, lock=True, verbose=args.verbose)
-    cspace = makeControlSpace(space, AntEnv_config, verbose=args.verbose)
 
     if space.isCompound():
         print(ompl_utils.colorize("-" * 120, color="magenta"))
@@ -735,20 +499,19 @@ if __name__ == "__main__":
         print(ompl_utils.colorize("-" * 120, color="magenta"))
     # ===========================================================================
     # Define a simple setup class
-    ss = oc.SimpleSetup(cspace)
+    ss = og.SimpleSetup(space)
 
     # Retrieve current instance of Space Information
     si = ss.getSpaceInformation()
 
     # ===========================================================================
     # Set the start state and goal state
-    start = makeStartState(space, maze_env_config["start"])
+    start = makeStartState(
+        space, maze_env_config["start"]
+    )
     threshold = maze_env_config["goal_threshold"]  # 0.6
     # 2D Goal
-    goal_pos = np.array([7.0, 0.0])
-    ic(goal_pos)
-    # goal = MazeGoal(si, maze_env_config["goal"], threshold)
-    goal = MazeGoal(si, goal_pos, threshold)
+    goal = MazeGoal(si, maze_env_config["goal"], threshold)
     ss.setStartState(start)
     ss.setGoal(goal)
 
@@ -758,74 +521,43 @@ if __name__ == "__main__":
     ss.setStateValidityChecker(stateValidityChecker)
 
     # ===========================================================================
-    # Set State Propagator
-    propagator = AntStatePropagator(
-        si,
-        env.unwrapped.wrapped_env,
-        param=AntEnv_config,
-        env=env,
-    )
-    ss.setStatePropagator(propagator)
-
-    # Set propagator step size (0.02 in Mujoco)
-    step_size = env.unwrapped.wrapped_env.sim.model.opt.timestep
-    si.setPropagationStepSize(step_size)
-    si.setMinMaxControlDuration(minSteps=1, maxSteps=1)  # TODO: what should this be?
-    # ===========================================================================
     # Allocate and set the planner to the SimpleSetup
-    planner = ompl_utils.allocateControlPlanner(si, plannerType=args.planner)
-    # planner.setSelectionRadius(10.0)
-    # planner.setPruningRadius(10.0)
+    planner = ompl_utils.allocateGeometricPlanner(si, plannerType="rrtstar")
     ss.setPlanner(planner)
 
     # Set optimization objective
     ss.setOptimizationObjective(ob.PathLengthOptimizationObjective(si))
-    # TODO: change this back
-    # objective = ShortestPathObjective(si)
-    # ss.setOptimizationObjective(objective)
-
+    
+    
     # ===========================================================================
-
-    """
-    Possible Error:
-        (1) Error:   RRT: There are no valid initial states!
-            - Check if the start state is in bounds
-            - Check if the both limited and range are set in XML file. If no limited specified, the range is ignored.
-            - Check if the start state in stateValidityChecker.isvalid()
-            - Check if there is noise add to start state
-            - Check the state valid condition
-        (2)  bounds not satisfied in propogator.propagate()
-            - Check if there is a clip in control during the calculation. (should enforce it as the cbounds)
-            - ompl check first state and call propagate() first and then pass to isValid()
-                It is OK that `result` state is not in bounds. It will be invalid in stateValidityChecker.isvalid()
-            - one loop wrap angle cannot properly warp the angle > abs(3* pi)
-            - Remember to check the angle after sim.step. It might be out of [-pi, pi].
-                Enforce it to be bounds if it is a SO2 state. Otherwise, isVlaid will take care of the rest of them.
-        (3) MotionValidator not working
-            - There is a propagateWhileValid() which calls isValid() and propagate() alternatively.
-            - This function stop if a collision is found and return the previous number of steps,
-                which actually performed without collison.
-            - Since the propagatorStepSize is relatively small.
-            This should be good enough to ensure the motion is valid.
-        (4) Propagate Duration
-            - Sync the duration with num of mujoco sim step
-    """
-    # ===========================================================================
-    assert np.allclose(
-        np.concatenate([old_sim_state.qpos, old_sim_state.qvel]),
-        maze_env_config["start"],
-    )
-    ic(old_sim_state)
-
     # Plan
-    controlPath, geometricPath = ompl_utils.plan(ss, args.runtime)
+    solved = ss.solve(args.runtime)
+    geometricPath = None
+    if solved:
+        if solved.getStatus() == ob.PlannerStatus.APPROXIMATE_SOLUTION:
+            print(ompl_utils.colorize("Solution is approximate!", color="yellow"))
 
-    # Make the path such that all controls are applied for a single time step (computes intermediate states)
-    controlPath.interpolate()
+        elif solved.getStatus() == ob.PlannerStatus.EXACT_SOLUTION:
+            print(ompl_utils.colorize("Solution is exact!", color="blue"))
+        else:
+            print(ompl_utils.colorize(solved.getStatus(), color="red"))(ss, args.runtime)
+
+        # Print solution Cost
+        pdef = ss.getProblemDefinition()
+        geometricPath = ss.getSolutionPath()
+        planner_name = ss.getPlanner().getName()
+        path_length = geometricPath.length()
+        cost = geometricPath.cost(pdef.getOptimizationObjective()).value()
+        print(
+            ompl_utils.colorize(
+                f"{planner_name} found solution of path length {path_length:.4f} with an optimization objective value of {cost:.4f}",
+                color="blue",
+            )
+        )
 
     # path to numpy array
     geometricPath_np = ompl_utils.path_to_numpy(geometricPath, state_dim=29)
-    ic(geometricPath_np[:, :2], geometricPath_np.shape)
+    ic(geometricPath_np)
 
     if args.verbose:
         print(f"Solution:\n{geometricPath_np}\n")
@@ -838,19 +570,4 @@ if __name__ == "__main__":
     # Visualize the path
     visualize_path(path_name)
 
-    # retrive controls
-    ompl_controls = controlPath.getControls()
-    control_count = controlPath.getControlCount()
-
-    controls = np.asarray(
-        [[u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]] for u in ompl_controls]
-    )
-    ic(controls)
-    ic(controls.shape)
-
-    # Render the contol path in gym environment
-    env.unwrapped.wrapped_env.sim.set_state(
-        old_sim_state
-    )  # Ensure we have the same start position
-    visualize_env(env, controls, goal=goal_pos, threshold=0.6)
-    ic(env._max_episode_steps)
+    
