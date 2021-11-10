@@ -143,12 +143,11 @@ def visualize_env(env, controls, goal, threshold):
             env.render(mode="human")
         simState = env.unwrapped.wrapped_env.sim.get_state()
         print(ompl_utils.colorize("-" * 120, color="magenta"))
-        
+
         ic(simState)
         ic(u)
         ic(info)
-        
-        
+
         reached_goal = info["position"]
         if np.linalg.norm(goal - reached_goal, ord=2) <= threshold:
             print_success = True
@@ -157,7 +156,7 @@ def visualize_env(env, controls, goal, threshold):
             if print_success:
                 print(ompl_utils.colorize("Goal reached!", "green"))
             else:
-                print(ompl_utils.colorize("Goal not reached!", "red"))
+                print(ompl_utils.colorize("Goal NOT Reached!", "red"))
     env.close()
 
 
@@ -428,8 +427,7 @@ class AntStatePropagator(oc.StatePropagator):
         self.qpos_temp = np.zeros(15)
         self.qvel_temp = np.zeros(14)
         self.action_temp = np.zeros(8)
-        
-        #
+
         self.v_xyz_lim = 10  # from the google sheet
         self.v_rot_lim = 10  # from the google sheet
         self.v_joint_lim = 10
@@ -443,7 +441,6 @@ class AntStatePropagator(oc.StatePropagator):
         14 R = qvel[:14]
         """
         assert self.si.satisfiesBounds(state), "Input state not in bounds"
-
         assert self.agent_model.dt == 0.1
         assert self.agent_model.frame_skip == 5
 
@@ -472,66 +469,55 @@ class AntStatePropagator(oc.StatePropagator):
             self.qvel_temp[i] = state[9][i]
 
         # ========================================================
-        # old state
-        current_simState = self.agent_model.sim.get_state()
-
-        # copy OMPL State to Mujoco
-        # * self.agent_model = env.unwrapped.wrapped_env
-        self.env.unwrapped.wrapped_env.set_state(self.qpos_temp, self.qvel_temp)
-
         # copy OMPL contorl to Mujoco (8D)
         for i in range(self.action_temp.shape[0]):
             self.action_temp[i] = control[i]
 
-        # # Implmentation self.do_siulation
-        # self.agent_model.do_simulation(
-        #     self.action_temp, self.agent_model.frame_skip
-        # )  # 5
+        # ========================================================
 
-        # next_simState = self.agent_model.sim.get_state()
-        # next_obs = self.agent_model._get_obs()
+        # old state in mujoco sim
+        temp_simState = self.env.unwrapped.wrapped_env.sim.get_state()
 
-        # next_qpos = next_obs[:15]
-        # next_qvel = next_obs[15:]
+        # copy OMPL State to Mujoco
+        # * self.agent_model = self.env.unwrapped.wrapped_env
+        # This called self.sim.forward() internally
+        self.env.unwrapped.wrapped_env.set_state(self.qpos_temp, self.qvel_temp)
+        current_simState = self.env.unwrapped.wrapped_env.sim.get_state()
 
-        # assert np.array_equal(next_simState.qpos, next_qpos)
-        # assert np.array_equal(next_simState.qvel, next_qvel)
+        # Implmentation self.do_siulation
+        self.env.unwrapped.wrapped_env.do_simulation(self.action_temp, 10)  # 5
 
-        # ic(current_simState)
-        # ic(next_simState)
-        # # ic(next_qpos, next_qvel)
-        # print(ompl_utils.colorize("=" * 150, "red"))
+        # next_simState = self.env.unwrapped.wrapped_env.sim.get_state()
+        # # ic(temp_simState)
+        # # ic(current_simState)
+        # # ic(next_simState)
+        # # print(ompl_utils.colorize("=" * 150, "red"))
 
-        # reset sim State
-        old_simState = mujoco_py.MjSimState(
-            current_simState.time,
-            current_simState.qpos,
-            current_simState.qvel,
-            current_simState.act,
-            current_simState.udd_state,
+        # # reset sim State to current state
+        # self.env.unwrapped.wrapped_env.sim.set_state(current_simState)
+        # self.env.unwrapped.wrapped_env.sim.forward()
+        # current_envSimState = self.env.unwrapped.wrapped_env.sim.get_state()
+
+        # self.env.step(self.action_temp)
+        # next_env_simState = self.env.unwrapped.wrapped_env.sim.get_state()
+
+        # # ic(current_envSimState)
+        # # ic(next_env_simState)
+        # # print(ompl_utils.colorize("=" * 150, "red"))
+
+        # assert np.allclose(current_envSimState.qpos, current_simState.qpos)
+        # assert np.allclose(current_envSimState.qvel, current_simState.qvel)
+
+        # assert np.allclose(next_env_simState.qpos, next_simState.qpos)
+        # assert np.allclose(next_env_simState.qvel, next_simState.qvel)
+
+        next_obs = np.concatenate(
+            [
+                self.env.unwrapped.wrapped_env.sim.data.qpos,
+                self.env.unwrapped.wrapped_env.sim.data.qpos,
+            ]
         )
-        self.env.unwrapped.wrapped_env.sim.set_state(old_simState)
-        self.env.unwrapped.wrapped_env.sim.forward()
 
-        next_env_obs, *_ = self.env.step(self.action_temp)
-        next_env_obs = next_env_obs[:-1]
-
-        # next_env_simState = self.agent_model.sim.get_state()
-        # next_env_obs = self.agent_model._get_obs()
-        # next_env_qpos = next_env_obs[:15]
-        # next_env_qvel = next_env_obs[15:]
-        # ic(old_simState)
-        # ic(next_env_simState)
-        # assert np.array_equal(next_env_simState.qpos, next_env_qpos)
-        # assert np.array_equal(next_env_simState.qvel, next_env_qvel)
-        # assert np.array_equal(next_qpos, next_env_qpos)
-        # assert np.array_equal(next_qvel, next_env_qvel)
-        # import ipdb; ipdb.set_trace()
-        next_obs = next_env_obs
-
-        next_env_qpos = next_env_obs[:15]
-        next_env_qvel = next_env_obs[15:]
-        
         # Copy Mujoco State back to OMPL
         # next R3 state:  [x, y, z], SO3:[w, x, y, z]
         result[0].setXYZ(next_obs[0], next_obs[1], next_obs[2])
@@ -551,9 +537,13 @@ class AntStatePropagator(oc.StatePropagator):
         # next joint velocity: [J1_dot, ... J8_dot]
         for p in range(14):
             if p < 3:
-                assert -self.v_xyz_lim <= next_obs[15 + p] <= self.v_xyz_lim
+                assert (
+                    -self.v_xyz_lim <= next_obs[15 + p] <= self.v_xyz_lim
+                ), f"{p}: {next_obs[15 + p]}"
             elif 3 <= p < 6:
-                assert -self.v_rot_lim <= next_obs[15 + p] <= self.v_rot_lim, f"{p}: {next_obs[15 + p]}"
+                assert (
+                    -self.v_rot_lim <= next_obs[15 + p] <= self.v_rot_lim
+                ), f"{p}: {next_obs[15 + p]}"
             else:
                 assert -self.v_joint_lim <= next_obs[15 + p] <= self.v_joint_lim
             # result[1] is R^14
@@ -657,8 +647,8 @@ if __name__ == "__main__":
         "goal_threshold": env.unwrapped._task.goals[0].threshold,  # 0.6
         "maze_size_scaling": env.unwrapped._maze_size_scaling,
         "init_positons": list(env.unwrapped._init_positions[0]),
-        "init_torso_x": env.unwrapped._init_torso_x,
-        "init_torso_y": env.unwrapped._init_torso_y,
+        # "init_torso_x": env.unwrapped._init_torso_x,
+        # "init_torso_y": env.unwrapped._init_torso_y,
         "xy_limits": list(env.unwrapped._xy_limits()),
     }
     ic(maze_env_config)
@@ -697,7 +687,7 @@ if __name__ == "__main__":
 
     AntEnv_config = {
         # First Joint is Free -> SE3 = R^3 + SO3
-        "R3_low": [-4, -4, 0.25],  # min z takes from radius of the free joint(0.25)
+        "R3_low": [-4, -4, -3],  # min z takes from radius of the free joint(0.25)
         "R3_high": [20, 20, 3],
         # initial z pos is 0.75 # ? does z axis affect the torso?
         # Rest of Joints (exclude the first free joint)
@@ -745,7 +735,7 @@ if __name__ == "__main__":
     start = makeStartState(space, maze_env_config["start"])
     threshold = maze_env_config["goal_threshold"]  # 0.6
     # 2D Goal
-    goal_pos = np.array([7.0, 0.0])
+    goal_pos = np.array([3.0, 0.0])
     ic(goal_pos)
     # goal = MazeGoal(si, maze_env_config["goal"], threshold)
     goal = MazeGoal(si, goal_pos, threshold)
