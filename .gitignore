@@ -2,6 +2,7 @@
 gym/
 # OMPL
 ompl*/
+mujoco-maze/
 
 # Data
 *.zip

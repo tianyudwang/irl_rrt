@@ -35,16 +35,16 @@ class IRL_Agent(BaseAgent):
         self.irl_env = IRLEnv(self.env, self.reward)
 
         # actor/policy with wrapped env
-        self.actor = SAC("MlpPolicy", self.irl_env, verbose=1)
+        self.actor = SAC("MlpPolicy", self.irl_env, verbose=1, device=ptu.device)
 
         self.state_dim = self.agent_params['ob_dim']
 
-#        self.planner = PRMPlanner(self.state_dim, self.bounds, self.goal)
+        # self.planner = PRMPlanner(self.state_dim, self.bounds, self.goal)
         self.planner = SSTPlanner()
 
         # Replay buffer to hold demo transitions (maximum transitions)
-        self.demo_buffer = ReplayBuffer(10000)
-        self.sample_buffer = ReplayBuffer(10000)
+        self.demo_buffer = ReplayBuffer(10_000)
+        self.sample_buffer = ReplayBuffer(10_000)
 
     def train_reward(self):
         """
@@ -55,8 +55,9 @@ class IRL_Agent(BaseAgent):
             self.agent_params['transitions_per_reward_update'], 
             demo=True)
 
-        agent_transitions = self.sample_transitions(
-            self.agent_params['transitions_per_reward_update'])
+        # ? Do we need this line? It's not being called
+        # agent_transitions = self.sample_transitions(
+        #     self.agent_params['transitions_per_reward_update'])
 
         # Update OMPL SimpleSetup object cost function with current learned reward
         self.planner.update_ss_cost(self.reward.cost_fn)
@@ -82,7 +83,6 @@ class IRL_Agent(BaseAgent):
                 log_prob = utils.get_log_prob(self.actor, agent_ac)
                 agent_next_ob = self.env.one_step_transition(ob, agent_ac)
 
-                
                 # Find optimal path from s' to goal
                 path, controls = self.planner.plan(agent_next_ob)
                 path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)

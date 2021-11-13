@@ -67,6 +67,12 @@ def isStateValid(si: ob.SpaceInformation, state: ob.State) -> bool:
 
     return si.satisfiesBounds(state) and pos_inbound and vel_inbound
 
+g = 10.0
+m = 1.0
+l = 1.0
+a = 3.0 * g / (2.0 * l)
+b = 3.0 / (m * l ** 2)
+
 
 def propagate(
     start: ob.State, control: oc.Control, duration: float, state: ob.State
@@ -92,7 +98,10 @@ def propagate(
     u = control[0]
     assert -max_torque <= u <= max_torque, f"Control input u is out of bounds: {u}"
 
-    newthdot = th_dot + (3.0 * g / (2.0 * l) * np.sin(th) + 3.0 / (m * l ** 2) * u) * dt
+    a = 3.0 * g / (2.0 * l)
+    b = 3.0 / (m * l ** 2)
+    # newthdot = th_dot + (3.0 * g / (2.0 * l) * np.sin(th) + 3.0 / (m * l ** 2) * u) * dt
+    newthdot = th_dot + ( a* np.sin(th) + b * u) * dt
     newthdot = np.clip(
         newthdot, -max_speed, max_speed
     )  # This clip is needed or use VectorBound.enforceBounds()

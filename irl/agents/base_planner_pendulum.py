@@ -1,3 +1,4 @@
+from math import pi, sin, cos
 from functools import partial
 
 import numpy as np
@@ -41,6 +42,9 @@ class BasePlanner:
         self.dt = 0.05
         self.max_angular_velocity = 8.0
         self.max_torque = 2.0
+        
+        self.a = 3.0 * self.g / (2.0 * self.l)
+        self.b = 3.0 / (self.m * self.l ** 2)
 
         self.init_simple_setup()
 
@@ -82,12 +86,13 @@ class BasePlanner:
         th, th_dot, u = start[0].value, start[1][0], control[0]
 
         # Assert states are proper
-        assert -np.pi <= th <= np.pi, f"State theta is out of bounds: {th}"
+        assert -pi <= th <= pi, f"State theta is out of bounds: {th}"
         assert -8. <= th_dot <= 8., f"State theta_dot is out of bounds: {th_dot}"
         assert -2. <= u <= 2, f"Control input u is out of bounds: {u}"
 
-        newthdot = th_dot + (3.0 * self.g / (2.0 * self.l) * np.sin(th) 
-                             + 3.0 / (self.m * self.l ** 2) * u) * duration
+        # newthdot = th_dot + (3.0 * self.g / (2.0 * self.l) * sin(th) 
+        #                      + 3.0 / (self.m * self.l ** 2) * u) * duration
+        newthdot = th_dot + (self.a * sin(th) + self.b * u) * duration
         newthdot = np.clip(newthdot, -self.max_angular_velocity, self.max_angular_velocity)
         newth = th + newthdot * duration
 
@@ -98,12 +103,20 @@ class BasePlanner:
         self.space.enforceBounds(state)
 
 
-    def init_simple_setup(self):
+    def init_simple_setup(self, log_level=0):
         """
         Initialize an ompl::control::SimpleSetup instance
         """
+        assert isinstance(log_level, int)
+        assert 0 <= log_level <= 2
+        
         # Set log to warn/info/debug
-        ou.setLogLevel(ou.LOG_WARN)
+        if log_level == 0:
+            ou.setLogLevel(ou.LOG_WARN)
+        elif log_level == 1:    
+            ou.setLogLevel(ou.LOG_INFO)
+        else:
+            ou.setLogLevel(ou.LOG_DEBUG)        
 
         # Define state and control spaces
         self.space, self.cspace = self.construct_spaces()
@@ -147,9 +160,9 @@ class BasePlanner:
         solved = self.ss.solve(5.0)
         if solved:
             control_path = self.ss.getSolutionPath()
-            states = np.array([[state[0].value, state[1][0]] 
+            states = np.asarray([[state[0].value, state[1][0]] 
                               for state in control_path.getStates()], dtype=np.float32)
-            controls = np.array([u[0] for u in control_path.getControls()], 
+            controls = np.asarray([u[0] for u in control_path.getControls()], 
                                 dtype=np.float32)
             return states, controls
         else:

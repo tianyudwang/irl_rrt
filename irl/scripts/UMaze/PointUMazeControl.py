@@ -4,6 +4,7 @@ import os
 import time
 import pathlib
 import math
+from math import pi
 import yaml
 
 import numpy as np
@@ -294,7 +295,8 @@ class PointStateValidityChecker(ob.StateValidityChecker):
         if inSquare:
             # In the middle block cells
             inMidBlock = all(
-                [self.x_limits[0] <= x_pos <= 6 + self.size, 2 - self.size <= y_pos <= 6 + self.size]
+                [self.x_limits[0] <= x_pos <= 6.5,# + self.size,
+                 1.5<= y_pos <= 6.5,]# 2 - self.size, 6 + self.size]
             )
             if inMidBlock:
                 valid = False
@@ -390,8 +392,14 @@ class PointStatePropagator(oc.StatePropagator):
         self.qvel_temp[1] = V_state[1]
         self.qvel_temp[2] = V_state[2]
 
-        # Normalize orientation to be in [-pi, pi], since it is SO2
-        self.qpos_temp[2] = ompl_utils.angle_normalize(self.qpos_temp[2] + control[1])
+        
+        self.qpos_temp[2] += control[1]
+        # Check if the orientation is in [-pi, pi]
+        if not(-pi <= self.qpos_temp[2] <= pi):
+            # Normalize orientation to be in [-pi, pi], since it is SO2
+            # * only perform this normalization when the orientation is not in [-pi, pi]
+            # * This dramatically cutdown the planning time 
+            self.qpos_temp[2] = ompl_utils.angle_normalize(self.qpos_temp[2])
 
         # Compute increment in each direction
         # using  math.sin/cos() calculate single number is much faster than numpy.sin/cos()
@@ -412,7 +420,8 @@ class PointStatePropagator(oc.StatePropagator):
 
         # Yaw angle migh be out of range [-pi, pi] after several steps.
         # Should enforced yaw angle since it should always in bounds
-        next_obs[2] = ompl_utils.angle_normalize(next_obs[2])
+        if not(-pi <= next_obs[2] <= pi):
+            next_obs[2] = ompl_utils.angle_normalize(next_obs[2])
 
         # next_obs[3:] = np.clip(next_obs[3:], -self.velocity_limits, self.velocity_limits)
         # assert -np.pi <= next_obs[2] <= np.pi, "Yaw out of bounds after mj sim step"
@@ -584,6 +593,7 @@ if __name__ == "__main__":
         "c_bounds_low": [ctrls[0].range[0], ctrls[1].range[0]],  # [-1, -0.25]
         "c_bounds_high": [ctrls[0].range[1], ctrls[1].range[1]],  # [1,  0.25]
     }
+    ic(PointEnv_config)
 
     if args.dummy_setup:
         # This is a dummy setup for ease of congfiguration
