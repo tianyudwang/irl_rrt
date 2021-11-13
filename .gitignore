@@ -5,7 +5,7 @@ ompl*/
 mujoco-maze/
 
 # Data
-*.zip
+# *.zip
 data/
 
 # Byte-compiled / optimized / DLL files
