@@ -1,3 +1,4 @@
+import random
 from math import pi, sin, cos
 from typing import Union, Tuple
 
@@ -11,7 +12,49 @@ from ompl import base as ob
 from ompl import geometric as og
 from ompl import control as oc
 
-from icecream import ic
+
+def visualize_path(data: np.ndarray, goal=[0, 8]):
+    """
+    From https://ompl.kavrakilab.org/pathVisualization.html
+    """
+    from matplotlib import pyplot as plt
+
+    fig = plt.figure()
+    ax = plt.axes(projection="3d")
+    # path
+    ax.plot(data[:, 0], data[:, 1], "o-")
+
+    ax.plot(
+        data[0, 0], data[0, 1], "go", markersize=10, markeredgecolor="k", label="start"
+    )
+    ax.plot(
+        data[-1, 0],
+        data[-1, 1],
+        "ro",
+        markersize=10,
+        markeredgecolor="k",
+        label="achieved goal",
+    )
+    ax.plot(
+        goal[0], goal[1], "bo", markersize=10, markeredgecolor="k", label="desired goal"
+    )
+
+    # Grid
+    UMaze_x = [-2, 10, 10, -2, -2, 6, 6, -2, -2, -2]
+    UMaze_y = [-2, -2, 10, 10, 6, 6, 2, 2, 2, -2]
+    ax.plot(UMaze_x, UMaze_y, "r")
+
+    plt.xlim(-4, 12)
+    plt.ylim(-4, 12)
+    plt.legend()
+    plt.show()
+
+
+def setRandomSeed(seed: int) -> None:
+    """Set the random seed"""
+    ou.RNG(seed)
+    random.seed(seed)
+    np.random.seed(seed)
 
 
 def angle_normalize(x: float) -> float:
@@ -40,12 +83,22 @@ def make_RealVectorBounds(bounds_dim: int, low, high) -> ob.RealVectorBounds:
     return vector_bounds
 
 
+def path_to_numpy(
+    path: Union[og.PathGeometric, oc.PathControl], state_dim: int
+) -> np.ndarray:
+    """Convert OMPL path to numpy array"""
+    assert isinstance(state_dim, int)
+    return np.fromstring(path.printAsMatrix(), dtype=float, sep="\n").reshape(
+        -1, state_dim
+    )
+
+
 class IRLCostObjective(ob.OptimizationObjective):
     def __init__(self, si, cost_fn):
         super(IRLCostObjective, self).__init__(si)
         self.cost_fn = cost_fn
 
-    def motionCost(self, s1, s2):
+    def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
         x1, y1 = s1[0].getX(), s1[0].getY()
         x2, y2 = s2[0].getX(), s2[0].getY()
         s1 = np.array([x1, y1], dtype=np.float64)
@@ -63,7 +116,12 @@ class MazeGoal(ob.Goal):
     An OMPL Goal that satisfy when euclidean dist between state and goal under a threshold
     """
 
-    def __init__(self, si: oc.SpaceInformation, goal: np.ndarray, threshold: float):
+    def __init__(
+        self,
+        si: Union[oc.SpaceInformation, ob.SpaceInformation],
+        goal: np.ndarray,
+        threshold: float,
+    ):
         super().__init__(si)
         assert goal.ndim == 1
         self.si = si
@@ -76,7 +134,7 @@ class MazeGoal(ob.Goal):
         """
         SE2_state = state[0]
         x, y = SE2_state.getX(), SE2_state.getY()
-        return np.linalg.norm(self.goal - np.array([x, y])) < self.threshold
+        return np.linalg.norm(self.goal - np.array([x, y])) <= self.threshold
 
 
 class PointStateValidityChecker(ob.StateValidityChecker):
@@ -87,19 +145,19 @@ class PointStateValidityChecker(ob.StateValidityChecker):
         super().__init__(si)
         self.si = si
         self.size = 0.5
-        self.scaling = 4.0
-        self.x_limits = [-2, 10]
-        self.y_limits = [-2, 10]
+        # self.x_lim_low = self.y_lim_low = -2
+        # self.x_lim_high = self.y_lim_high = 10
 
-        self.Umaze_x_min = self.x_limits[0] + self.size
-        self.Umaze_y_min = self.y_limits[0] + self.size
-        self.Umaze_x_max = self.x_limits[1] - self.size
-        self.Umaze_y_max = self.y_limits[1] - self.size
+        self.Umaze_x_min = self.Umaze_y_min = -2 + self.size
+        self.Umaze_x_max = self.Umaze_y_max = 10 - self.size
 
     def isValid(self, state: ob.State) -> bool:
 
+        if not self.si.satisfiesBounds(state):
+            return False
+
         SE2_state = state[0]
-        # assert isinstance(SE2_state, ob.SE2StateSpace.SE2StateInternal)
+        assert isinstance(SE2_state, ob.SE2StateSpace.SE2StateInternal)
 
         x_pos = SE2_state.getX()
         y_pos = SE2_state.getY()
@@ -113,12 +171,7 @@ class PointStateValidityChecker(ob.StateValidityChecker):
         )
         if inSquare:
             # In the middle block cells
-            inMidBlock = all(
-                [
-                    self.x_limits[0] <= x_pos <= 6.5,  # 6 + self.size,
-                    1.5 - self.size <= y_pos <= 6.5,  #  2 - self.size, 6 + self.size,
-                ]
-            )
+            inMidBlock = (-2 <= x_pos <= 6.5) and (1.5 <= y_pos <= 6.5)
             if inMidBlock:
                 valid = False
             else:
@@ -128,7 +181,7 @@ class PointStateValidityChecker(ob.StateValidityChecker):
             valid = False
 
         # Inside empty cell and satisfiedBounds
-        return valid and self.si.satisfiesBounds(state)
+        return valid
 
 
 class PointStatePropagator(oc.StatePropagator):
@@ -143,9 +196,6 @@ class PointStatePropagator(oc.StatePropagator):
         self.agent_model = agent_model
         self.velocity_limits = velocity_limits
 
-        self.bounds_low = [-2, -2, -np.pi, -12, -12, -12]
-        self.bounds_high = [10, 10, np.pi, 12, 12, 12]
-
         # A placeholder for qpos and qvel in propagte function that don't waste tme on numpy creation
         self.qpos_temp = np.empty(3)
         self.qvel_temp = np.empty(3)
@@ -153,10 +203,6 @@ class PointStatePropagator(oc.StatePropagator):
     def propagate(
         self, state: ob.State, control: oc.Control, duration: float, result: ob.State
     ) -> None:
-        """
-        propagate function for control planning
-        Note duration is a dummy placeholder. 
-        """
         # Control [ballx, rot]
         assert self.si.satisfiesBounds(state), "Input state not in bounds"
         # SE2_state: qpos = [x, y, Yaw]
@@ -173,8 +219,7 @@ class PointStatePropagator(oc.StatePropagator):
         self.qvel_temp[2] = V_state[2]
 
         self.qpos_temp[2] += control[1]
-        # Check if the orientation is in [-pi, pi],
-        # if not normalize it to be in [-pi, pi], since it is SO2
+        # Normalize orientation to be in [-pi, pi], since it is SO2
         if not (-pi <= self.qpos_temp[2] <= pi):
             self.qpos_temp[2] = angle_normalize(self.qpos_temp[2])
 
@@ -183,7 +228,7 @@ class PointStatePropagator(oc.StatePropagator):
         self.qpos_temp[0] += cos(ori) * control[0]
         self.qpos_temp[1] += sin(ori) * control[0]
 
-        # Clip velocity is encode in cbound. range from [-12, 12] to [-10, 10] instead of clipping.
+        # Clip velocity enforced in cbound
 
         # copy OMPL State to Mujoco
         self.agent_model.set_state(self.qpos_temp, self.qvel_temp)
@@ -192,8 +237,8 @@ class PointStatePropagator(oc.StatePropagator):
         self.agent_model.sim.step()
         next_obs = self.agent_model._get_obs()
 
-        # Yaw angle migh be out of range [-pi, pi] after several propagate steps.
-        # Should enforced yaw angle since it is SO2 and should be always in bounds
+        # Yaw angle migh be out of range [-pi, pi] after several steps.
+        # Should enforced yaw angle since SO2 should always in bounds
         if not (-pi <= next_obs[2] <= pi):
             next_obs[2] = angle_normalize(next_obs[2])
 
@@ -218,34 +263,30 @@ class PointStatePropagator(oc.StatePropagator):
 class BasePlannerPointUMaze:
     def __init__(self, env, use_control=False, log_level=0):
         # TODO: the env might have several wrapper
-        self.env = env
-        self.agent_model = self.env.unwrapped.wrapped_env
-
-        self.init_sim_state = self.agent_model.sim.get_state()
-        self.start = np.concatenate(
-            [self.init_sim_state.qpos, self.init_sim_state.qvel]
-        )
+        self.agent_model = env.unwrapped.wrapped_env
 
         # space information
         self.state_dim = 6
         self.control_dim = 2
 
         # state bound
-        self.state_high = np.array([10, 10, pi, 10, 10, 10])
-        self.state_low = -self.state_high
+        state_high = np.array([10, 10, pi, 10, 10, 10])
+        state_low = np.array([-2, -2, pi, -10, -10, -10])
         # control bound
         self.control_high = np.array([1, 0.25])
         self.control_low = -self.control_high
-        
+
         # goal position and goal radius
-        self.goal = np.array([0, 8], dtype=np.float64)
+        self.goal_pos = np.array([0, 8])
         self.threshold = 0.6
 
-        self.qpos_low = self.state_low[:2]
-        self.qpos_high = self.state_high[:2]
-        self.qvel_low = self.state_low[3:]
-        self.qvel_high = self.state_high[3:]
+        self.qpos_low = state_low[:2]
+        self.qpos_high = state_high[:2]
+        self.qvel_low = state_low[3:]
+        self.qvel_high = state_high[3:]
 
+        self.space: ob.StateSpace = None
+        self.cspace: oc.ControlSpace = None
         self.init_simple_setup(use_control, log_level)
 
     @property
@@ -298,32 +339,31 @@ class BasePlannerPointUMaze:
         cspace.setBounds(c_bounds)
         return cspace
 
-    def makeStartState(self) -> ob.State:
+    def makeStartState(self, s0: np.ndarray) -> ob.State:
         """
         Create a start state.
         """
-        if isinstance(self.start, np.ndarray):
-            assert self.start.ndim == 1
-        start = ob.State(self.space)
-        for i in range(len(self.start)):
-            start[i] = self.start[i]
-        return start
+        if isinstance(s0, np.ndarray):
+            assert s0.ndim == 1
+        start_state = ob.State(self.space)
+        for i in range(len(s0)):
+            start_state[i] = s0[i]
+        return start_state
 
     def init_simple_setup(self, use_control: bool = False, log_level: int = 0):
         """
         Initialize an ompl::control::SimpleSetup instance
             or ompl::geometric::SimpleSetup instance. if use_control is False.
         """
-        assert isinstance(log_level, int)
-        assert 0 <= log_level <= 2
-
+        assert isinstance(log_level, int) and 0 <= log_level <= 2
+        log = {
+            0: ou.LOG_WARN,
+            1: ou.LOG_INFO,
+            2: ou.LOG_DEBUG,
+        }
         # Set log to warn/info/debug
-        if log_level == 0:
-            ou.setLogLevel(ou.LOG_WARN)
-        elif log_level == 1:
-            ou.setLogLevel(ou.LOG_INFO)
-        else:
-            ou.setLogLevel(ou.LOG_DEBUG)
+        ou.setLogLevel(log[log_level])
+        print(f"Set OMPL LOG_LEVEL to {log[log_level]}")
 
         # Define State Space
         self.space = self.makeStateSpace()
@@ -334,46 +374,50 @@ class BasePlannerPointUMaze:
             self.ss = oc.SimpleSetup(self.cspace)
             # Retrieve current instance of Space Information
             self.si = self.ss.getSpaceInformation()
-            # Set the start state and goal state
-            start = self.makeStartState()
-            goal = MazeGoal(self.si, self.goal, self.threshold)
-            self.ss.setStartState(start)
-            self.ss.setGoal(goal)
-
-            # Set State Validation Checker
-            stateValidityChecker = PointStateValidityChecker(self.si)
-            self.ss.setStateValidityChecker(stateValidityChecker)
 
             # Set State Propagator
-            propagator = PointStatePropagator(self.si, self.agent_model)
+            propagator = PointStatePropagator(self.si, self.agent_model, 10)
             self.ss.setStatePropagator(propagator)
 
             # Set propagator step size
             # ? PropagationStepSize refer to duration in propagation fucntion which is not using.
             self.si.setPropagationStepSize(self.PropagStepSize)  # 0.02 in Mujoco
             self.si.setMinMaxControlDuration(minSteps=1, maxSteps=1)
-
         else:
-            self.cspace = None
-            # TODO: og.SimpleSetup
-            pass
+            # Define a simple setup class
+            self.ss = og.SimpleSetup(self.space)
+            # Retrieve current instance of Space Information
+            self.si = self.ss.getSpaceInformation()
+
+        # Set State Validation Checker
+        stateValidityChecker = PointStateValidityChecker(self.si)
+        self.ss.setStateValidityChecker(stateValidityChecker)
+        # Set the goal state
+        self.goal_state = MazeGoal(self.si, self.goal_pos, self.threshold)
+        self.ss.setGoal(self.goal_state)
 
     def update_ss_cost(self, cost_fn):
         # Set up cost function
         costObjective = getIRLCostObjective(self.si, cost_fn)
         self.ss.setOptimizationObjective(costObjective)
 
-    def plan(self, start_state: np.ndarray, solveTime: float = 5.0) -> Tuple[np.ndarray, np.ndarray]:
+    def clearDataAndSetStartState(self, s0: np.ndarray):
         """
-        Perform motion planning for a specified amount of time.
+        Clear previous planning computation data, does not affect settings and start/goal
+        And set a new start state.
         """
-        # Clear previous planning computation data, does not affect settings and start/goal
         self.ss.clear()
-
         # Reset the start state
-        start = ob.State(self.space)
-        start[0], start[1] = start_state[0].item(), start_state[1].item()
+        start = self.makeStartState(s0)
         self.ss.setStartState(start)
+
+    def control_plan(
+        self, start_state: np.ndarray, solveTime: float = 5.0
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Perform control planning for a specified amount of time.
+        """
+        self.clearDataAndSetStartState(start_state)
 
         solved = self.ss.solve(solveTime)
         if solved:
@@ -399,10 +443,29 @@ class BasePlannerPointUMaze:
         else:
             raise ValueError("OMPL is not able to solve under current cost function")
 
+    def geometric_plan(
+        self, start_state: np.ndarray, solveTime: float = 5.0
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Perform geometric planning for a specified amount of time.
+        """
+        self.clearDataAndSetStartState(start_state)
+
+        solved = self.ss.solve(solveTime)
+        if solved:
+            geometricPath = self.ss.getSolutionPath()
+            return path_to_numpy(geometricPath, self.state_dim)
+        else:
+            raise ValueError("OMPL is not able to solve under current cost function")
+
 
 class SSTPlanner(BasePlannerPointUMaze):
-    def __init__(self, env):
-        super(SSTPlanner, self).__init__(env, use_control=True, log_level=1)
+    """
+    Sparse Stable RRT (SST) is an asymptotically near-optimal incremental version of RRT
+    """
+
+    def __init__(self, env, log_level: int = 0):
+        super(SSTPlanner, self).__init__(env, True, log_level)
         self.init_planner()
 
     def init_planner(self):
@@ -410,29 +473,91 @@ class SSTPlanner(BasePlannerPointUMaze):
         planner = oc.SST(self.si)
         self.ss.setPlanner(planner)
 
+    def plan(
+        self, start_state: np.ndarray, solveTime: float = 5.0
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        return super().control_plan(start_state, solveTime)
 
-if __name__ == "__main__":
+
+class RRTstartPlanner(BasePlannerPointUMaze):
+    def __init__(self, env, log_level: int = 0):
+        super(RRTstartPlanner, self).__init__(env, False, log_level)
+        self.init_planner()
+
+    def init_planner(self):
+        # Set planner
+        planner = og.RRTstar(self.si)
+        self.ss.setPlanner(planner)
+
+    def plan(
+        self, start_state: np.ndarray, solveTime: float = 5
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        return super().geometric_plan(start_state, solveTime)
+
+
+class MinimumTransitionObjective(ob.PathLengthOptimizationObjective):
+    """Minimum number of Transitions"""
+
+    def __init__(self, si: Union[oc.SpaceInformation, ob.SpaceInformation]):
+        super(MinimumTransitionObjective, self).__init__(si)
+
+    def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
+        return ob.Cost(1.0)
+
+
+def test():
     import gym
     import mujoco_maze
+    from tqdm import tqdm
 
     env = gym.make("PointUMaze-v0")
-    env.reset()
-    planner = SSTPlanner(env)
+    print(env.spec.max_episode_steps)
 
-    planner.ss.setPlanner(oc.RRT(planner.si))
-    _, controls = planner.plan(planner.start, solveTime=5)
+    control_plan = False
 
-    # Ensure we have the same start position
-    env.unwrapped.wrapped_env.sim.set_state(planner.init_sim_state)
-    for u in controls:
-        qpos = env.unwrapped.wrapped_env.sim.data.qpos
-        qvel = env.unwrapped.wrapped_env.sim.data.qvel
-        # print(f"qpos: {qpos}, qvel: {qvel}")
+    if control_plan:
+        planner = SSTPlanner(env, log_level=2)
+        # RRT can successfully achieved goal but the number of transition.
+    else:
+        planner = RRTstartPlanner(env, log_level=2)
 
-        obs, rew, done, info = env.step(u)
+    # objective = MinimumTransitionObjective(planner.si)
+    # planner.ss.setOptimizationObjective(objective)
 
-        if done:
-            print("Reach Goal. Success!!")
-            break
-    env.close()
-    # test pass
+    seed = 0
+    setRandomSeed(seed)
+    env.seed(seed)
+
+    err = 0
+    excced = 0
+    if control_plan:
+
+        for i in tqdm(range(10), dynamic_ncols=True):
+            obs = env.reset()
+            state, controls = planner.plan(start_state=obs[:-1], solveTime=5)
+
+            # Ensure we have the same start position
+            env.unwrapped.wrapped_env.set_state(obs[:3], obs[3:-1])
+            for i, u in enumerate(controls):
+                obs, rew, done, info = env.step(u)
+
+                if done:
+                    print("Reach Goal. Success!!")
+                    break
+                if i == len(controls) - 1:
+                    print(info)
+                    print("EXCEED max_ep_len")
+                    excced += 1
+            if not done:
+                err += 1
+        print("err", err)
+        print("excced", err)
+    else:
+        obs = env.reset()
+        state = planner.plan(start_state=obs[:-1], solveTime=5)
+        visualize_path(state)
+
+
+# if __name__ == "__main__":
+
+#     test()

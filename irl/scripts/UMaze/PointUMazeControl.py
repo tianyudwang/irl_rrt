@@ -5,6 +5,7 @@ import time
 import pathlib
 import math
 from math import pi
+import random
 import yaml
 
 import numpy as np
@@ -259,26 +260,20 @@ class PointStateValidityChecker(ob.StateValidityChecker):
         self.si = si
         self.size = 0.5
         self.scaling = 4.0
-        self.x_limits = [-2, 10]
-        self.y_limits = [-2, 10]
+        self.x_lim_low = self.y_lim_low = -2
+        self.x_lim_high = self.y_lim_high = 10
         
-        self.Umaze_x_min = self.x_limits[0] + self.size
-        self.Umaze_y_min = self.y_limits[0] + self.size
-        self.Umaze_x_max = self.x_limits[1] - self.size
-        self.Umaze_y_max = self.y_limits[1] - self.size
+        self.Umaze_x_min = self.x_lim_low + self.size
+        self.Umaze_y_min = self.y_lim_low + self.size
+        self.Umaze_x_max = self.x_lim_high - self.size 
+        self.Umaze_y_max = self.y_lim_high - self.size
         
-        '''
-        ["B", "B", "B", "B", "B"]
-        ["B", "R", "E", "E", "B"]
-        ["B", "B", "B", "E", "B"]
-        ["B", "G", "E", "E", "B"]
-        ["B", "B", "B", "B", "B"]
-        '''
-        # [-1,0,1,2,3]
-        self.counter = 0
 
     def isValid(self, state: ob.State) -> bool:
-
+        
+        if not self.si.satisfiesBounds(state):
+            return False
+        
         SE2_state = state[0]
         assert isinstance(SE2_state, ob.SE2StateSpace.SE2StateInternal)
 
@@ -295,8 +290,7 @@ class PointStateValidityChecker(ob.StateValidityChecker):
         if inSquare:
             # In the middle block cells
             inMidBlock = all(
-                [self.x_limits[0] <= x_pos <= 6.5,# + self.size,
-                 1.5<= y_pos <= 6.5,]# 2 - self.size, 6 + self.size]
+               [-2 <= x_pos <= 6.5, 1.5 <= y_pos <= 6.5]
             )
             if inMidBlock:
                 valid = False
@@ -307,7 +301,7 @@ class PointStateValidityChecker(ob.StateValidityChecker):
             valid = False
 
         # Inside empty cell and satisfiedBounds
-        return valid and self.si.satisfiesBounds(state)    
+        return valid     
     
     # def isValid(self, state: ob.State) -> bool:
 
@@ -392,14 +386,11 @@ class PointStatePropagator(oc.StatePropagator):
         self.qvel_temp[1] = V_state[1]
         self.qvel_temp[2] = V_state[2]
 
-        
         self.qpos_temp[2] += control[1]
-        # Check if the orientation is in [-pi, pi]
-        if not(-pi <= self.qpos_temp[2] <= pi):
-            # Normalize orientation to be in [-pi, pi], since it is SO2
-            # * only perform this normalization when the orientation is not in [-pi, pi]
-            # * This dramatically cutdown the planning time 
+        if not (-pi <= self.qpos_temp[2] <= pi):
             self.qpos_temp[2] = ompl_utils.angle_normalize(self.qpos_temp[2])
+        # Normalize orientation to be in [-pi, pi], since it is SO2
+        # self.qpos_temp[2] = ompl_utils.angle_normalize(self.qpos_temp[2] + control[1])
 
         # Compute increment in each direction
         # using  math.sin/cos() calculate single number is much faster than numpy.sin/cos()
@@ -420,9 +411,10 @@ class PointStatePropagator(oc.StatePropagator):
 
         # Yaw angle migh be out of range [-pi, pi] after several steps.
         # Should enforced yaw angle since it should always in bounds
-        if not(-pi <= next_obs[2] <= pi):
+        # next_obs[2] = ompl_utils.angle_normalize(next_obs[2])
+        if not (-pi <= next_obs[2] <= pi):
             next_obs[2] = ompl_utils.angle_normalize(next_obs[2])
-
+        
         # next_obs[3:] = np.clip(next_obs[3:], -self.velocity_limits, self.velocity_limits)
         # assert -np.pi <= next_obs[2] <= np.pi, "Yaw out of bounds after mj sim step"
         # assert -10 <= next_obs[3] <= 10, "x-velocity out of bounds after mj sim step"
@@ -703,56 +695,68 @@ if __name__ == "__main__":
         (4) Propagate Duration
             - Sync the duration with num of mujoco sim step 
     """
+    # ===========================================================================
+    err = 0
+    for i in range(1):
+        seed = random.randint(0, 100)
+        # Set the random seed (especially ou.RNG)
+        ompl_utils.setRandomSeed(seed)
+        if i > 0:
+            ss.clear()
+        # Plan
+        controlPath, geometricPath = ompl_utils.plan(ss, args.runtime)
 
-    # Plan
-    controlPath, geometricPath = ompl_utils.plan(ss, args.runtime)
+        # Make the path such that all controls are applied for a single time step (computes intermediate states)
+        controlPath.interpolate()
 
-    # Make the path such that all controls are applied for a single time step (computes intermediate states)
-    controlPath.interpolate()
+        # path to numpy array
+        geometricPath_np = ompl_utils.path_to_numpy(geometricPath, state_dim=6)
 
-    # path to numpy array
-    geometricPath_np = ompl_utils.path_to_numpy(geometricPath, state_dim=6)
+        if args.verbose:
+            print(f"Solution:\n{geometricPath_np}\n")
 
-    if args.verbose:
-        print(f"Solution:\n{geometricPath_np}\n")
+        # Save the path to .txt file
+        path_name = path / f"{args.env_id}_path.txt"
+        with open(str(path_name), "w") as f:
+            f.write(geometricPath.printAsMatrix())
 
-    # Save the path to .txt file
-    path_name = path / f"{args.env_id}_path.txt"
-    with open(str(path_name), "w") as f:
-        f.write(geometricPath.printAsMatrix())
+        # Visualize the path
+        # visualize_path(path_name)
 
-    # Visualize the path
-    visualize_path(path_name)
+        # retrive controls
+        ompl_controls = controlPath.getControls()
+        control_count = controlPath.getControlCount()
 
-    # retrive controls
-    ompl_controls = controlPath.getControls()
-    control_count = controlPath.getControlCount()
+        # Ensure we have the same start position
+        env.unwrapped.wrapped_env.sim.set_state(old_sim_state)
 
-    # Ensure we have the same start position
-    env.unwrapped.wrapped_env.sim.set_state(old_sim_state)
+        controls = np.asarray([[u[0], u[1]] for u in ompl_controls])
+        ic(controls.shape)
 
-    controls = np.asarray([[u[0], u[1]] for u in ompl_controls])
-    ic(controls.shape)
+        # confrim_render = input("Do you want to render the environment ([y]/n)? ")
+        confrim_render = 'n'
+        # Render the contol path in gym environment
+        for u in controls:
+            qpos = env.unwrapped.wrapped_env.sim.data.qpos
+            qvel = env.unwrapped.wrapped_env.sim.data.qvel
+            # print(f"qpos: {qpos}, qvel: {qvel}")
 
-    confrim_render = input("Do you want to render the environment ([y]/n)? ")
-    # Render the contol path in gym environment
-    for u in controls:
-        qpos = env.unwrapped.wrapped_env.sim.data.qpos
-        qvel = env.unwrapped.wrapped_env.sim.data.qvel
-        # print(f"qpos: {qpos}, qvel: {qvel}")
-
-        obs, rew, done, info = env.step(u)
-        if args.render and confrim_render.lower() == "y":
-            try:
-                if args.render_video:
-                    img_array = env.render(mode="rgb_array")
-                else:
-                    env.render(mode="human")
-                    time.sleep(0.5)
-            except KeyboardInterrupt:
+            obs, rew, done, info = env.step(u)
+            if args.render and confrim_render.lower() == "y":
+                try:
+                    if args.render_video:
+                        img_array = env.render(mode="rgb_array")
+                    else:
+                        env.render(mode="human")
+                        time.sleep(0.5)
+                except KeyboardInterrupt:
+                    break
+            if done:
+                ic(info)
+                print(ompl_utils.colorize("Reach Goal. Success!!", color="green"))
                 break
-        if done:
-            ic(info)
-            print(ompl_utils.colorize("Reach Goal. Success!!", color="green"))
-            break
-    env.close()
+        env.close()
+        if not done:
+            err +=1
+            visualize_path(path_name)
+    ic(err)
