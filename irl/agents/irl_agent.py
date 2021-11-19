@@ -1,20 +1,28 @@
-
 import numpy as np
 import gym
 from stable_baselines3 import SAC
 
-from irl.agents.base_agent import BaseAgent 
-from irl.scripts.replay_buffer import ReplayBuffer
+from irl.agents.base_agent import BaseAgent
 from irl.agents.mlp_reward import MLPReward
-from irl.agents.rrt_planner import RRTPlanner
-from irl.agents.prm_planner import PRMPlanner
-import irl.scripts.pytorch_util as ptu 
+from irl.scripts.replay_buffer import ReplayBuffer
+
+# from irl.agents.rrt_planner import RRTPlanner
+# from irl.agents.prm_planner import PRMPlanner
+
+import irl.scripts.pytorch_util as ptu
 import irl.scripts.utils as utils
 from irl.agents.irl_env_wrapper import IRLEnv
-from irl.agents.base_planner_pendulum import SSTPlanner
+
 
 class IRL_Agent(BaseAgent):
-    def __init__(self, env, agent_params):
+    def __init__(
+        self,
+        env: gym.Env,
+        agent_params: dict,
+        env_name: str,
+        buffer_size: int = 10_000,
+        control_plan: bool = True,
+    ):
         super(IRL_Agent, self).__init__()
 
         # init vars
@@ -23,68 +31,99 @@ class IRL_Agent(BaseAgent):
 
         # reward function
         self.reward = MLPReward(
-            self.agent_params['ob_dim'],
-            self.agent_params['ac_dim'],
-            self.agent_params['n_layers'],
-            self.agent_params['size'],
-            self.agent_params['output_size'],
-            self.agent_params['learning_rate']
+            self.agent_params["ob_dim"],
+            self.agent_params["ac_dim"],
+            self.agent_params["n_layers"],
+            self.agent_params["size"],
+            self.agent_params["output_size"],
+            self.agent_params["learning_rate"],
         )
-        
+
         # create a wrapper env with learned reward
         self.irl_env = IRLEnv(self.env, self.reward)
 
         # actor/policy with wrapped env
         self.actor = SAC("MlpPolicy", self.irl_env, verbose=1, device=ptu.device)
 
-        self.state_dim = self.agent_params['ob_dim']
+        self.state_dim = self.agent_params["ob_dim"]
 
         # self.planner = PRMPlanner(self.state_dim, self.bounds, self.goal)
-        self.planner = SSTPlanner()
+
+        if env_name == "NavEnv-v0":
+            # TODO: (Yifan) I'm not sure which script is for NavEnv-v0
+            pass
+
+        elif env_name == "Pendulum-v0":
+            # only implement control plan for pendulum for now
+            from irl.agents.base_planner_pendulum import SSTPlanner
+
+            self.planner = SSTPlanner()
+            print(f"Using SST contol planner in {env_name}...")
+            
+
+        elif env_name in ["PointUMaze-v0", "PointUMaze-v1"]:
+            if control_plan:
+                from irl.agents.base_planner_PointUMaze import SSTPlanner
+
+                self.planner = SSTPlanner(self.env, log_level=2)
+                print(f"Using SST contol planner in {env_name}...")
+
+            else:
+                from irl.agents.base_planner_PointUMaze import RRTstarPlanner
+
+                self.planner = RRTstarPlanner(self.env, log_level=2)
+                print(f"Using RRTstar geometric planner in {env_name}...")
+                
 
         # Replay buffer to hold demo transitions (maximum transitions)
-        self.demo_buffer = ReplayBuffer(10_000)
-        self.sample_buffer = ReplayBuffer(10_000)
+        self.demo_buffer = ReplayBuffer(buffer_size)
+        self.sample_buffer = ReplayBuffer(buffer_size)
 
     def train_reward(self):
         """
         Train the reward function
         """
-        print('\nTraining agent reward function...')
+        print("\nTraining agent reward function...")
         demo_transitions = self.sample_transitions(
-            self.agent_params['transitions_per_reward_update'], 
-            demo=True)
+            self.agent_params["transitions_per_reward_update"], demo=True
+        )
 
+        # TODO: (Yifan)
         # ? Do we need this line? It's not being called
         # agent_transitions = self.sample_transitions(
         #     self.agent_params['transitions_per_reward_update'])
 
         # Update OMPL SimpleSetup object cost function with current learned reward
         self.planner.update_ss_cost(self.reward.cost_fn)
-
+        
         demo_paths = []
         agent_paths = []
         agent_log_probs = []
-
-        for i in range(self.agent_params['transitions_per_reward_update']):
+        for i in range(self.agent_params["transitions_per_reward_update"]):
             # Sample expert transitions (s, a, s')
             # and find optimal path from s' to goal
-            ob, ac, log_probs, rewards, next_ob, done = [var[i] for var in demo_transitions]
+            ob, ac, log_probs, rewards, next_ob, done = [
+                var[i] for var in demo_transitions
+            ]
+            ic("start first plan")
             path, controls = self.planner.plan(next_ob)
+            ic("end first plan")
+            
             path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
             demo_paths.append([path])
+
             
             # and find optimal path from s'_a to goal
             paths = []
             log_probs = []
-            for j in range(self.agent_params['agent_actions_per_demo_transition']):
+            for j in range(self.agent_params["agent_actions_per_demo_transition"]):
                 # Sample agent transitions (s, a, s') at each expert state s
                 agent_ac, _ = self.actor.predict(ob)
                 log_prob = utils.get_log_prob(self.actor, agent_ac)
                 agent_next_ob = self.env.one_step_transition(ob, agent_ac)
-
                 # Find optimal path from s' to goal
                 path, controls = self.planner.plan(agent_next_ob)
+
                 path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
                 paths.append(path)
                 log_probs.append(log_prob)
@@ -96,8 +135,10 @@ class IRL_Agent(BaseAgent):
         agent_log_probs = np.array(agent_log_probs)
 
         reward_logs = []
-        for step in range(self.agent_params['reward_updates_per_iter']):
-            reward_logs.append(self.reward.update(demo_paths, agent_paths, agent_log_probs))
+        for step in range(self.agent_params["reward_updates_per_iter"]):
+            reward_logs.append(
+                self.reward.update(demo_paths, agent_paths, agent_log_probs)
+            )
         return reward_logs
 
     def collate_fn(self, paths):
@@ -105,35 +146,40 @@ class IRL_Agent(BaseAgent):
         Pad the list of variable-length paths with goal locations
         """
         T = max([len(p) for path_l in paths for p in path_l])
-        paths = np.array([[np.pad(p, ((0, T-p.shape[0]),(0,0)), 'edge') 
-                 for p in path_l] for path_l in paths])
+        paths = np.array(
+            [
+                [np.pad(p, ((0, T - p.shape[0]), (0, 0)), "edge") for p in path_l]
+                for path_l in paths
+            ]
+        )
         return paths
 
-#    def plan_optimal_paths(self, transitions):
-#        """
-#        For each transition (s, a, s'), we find the optimal path from s' to goal
-#        """
-#        num_transitions = transitions[0].shape[0]
-#        paths = []
-#        for i in range(num_transitions):
-#            obs, ac, rew, next_obs, done = [var[i] for var in transitions]
-#            path = self.RRT_plan(next_obs)
-#            paths.append(path)
-#        return paths
-
+    #    def plan_optimal_paths(self, transitions):
+    #        """
+    #        For each transition (s, a, s'), we find the optimal path from s' to goal
+    #        """
+    #        num_transitions = transitions[0].shape[0]
+    #        paths = []
+    #        for i in range(num_transitions):
+    #            obs, ac, rew, next_obs, done = [var[i] for var in transitions]
+    #            path = self.RRT_plan(next_obs)
+    #            paths.append(path)
+    #        return paths
 
     def train_policy(self):
         """
         Train the policy/actor using learned reward
         """
-        print('\nTraining agent policy...')
+        print("\nTraining agent policy...")
         self.actor.learn(total_timesteps=1000, log_interval=5)
-        train_log = {'Policy loss': 0}
+        # TODO: (Yifan)
+        # ? why policy loss is 0? Does it refer to we are using planning?
+        train_log = {"Policy loss": 0}
         return train_log
 
     #####################################################
     #####################################################
-    
+
     def add_to_buffer(self, paths, demo=False):
         """
         Add paths to demo buffer
@@ -161,4 +207,3 @@ class IRL_Agent(BaseAgent):
             return self.demo_buffer.sample_random_data(batch_size)
         else:
             return self.sample_buffer.sample_recent_data(batch_size)
-

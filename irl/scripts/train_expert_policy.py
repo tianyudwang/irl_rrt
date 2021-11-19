@@ -24,8 +24,10 @@ def build_env(env_name: str):
     elif env_name in ["PointUMaze-v0", "PointUMaze-v1"]:
         # v0 adn v1 has different reward function, all others are the same
         import mujoco_maze
-
-        env = gym.make(env_name)
+        from remove_timeDim_wrapper import RemovTimeFeatureWrapper
+        
+        # * This env includes the time at the last axis, which should be removed.
+        env = RemovTimeFeatureWrapper(gym.make(env_name))
     else:
         raise ValueError("Environment {} not supported yet ...".format(env_name))
     return env
@@ -75,10 +77,10 @@ def train_policy(
         raise ValueError(f"RL algorithm {algo} not supported yet ...")
 
     if resume_training:
-        print("Resuming training ...")
+        print("Resuming training ...\n")
         model = algo_cls.load(policy_name, device=device)
     else:
-        print("Training from scratch ...")
+        print("Training from scratch ...\n")
         model = algo_cls(
             "MlpPolicy",
             env,

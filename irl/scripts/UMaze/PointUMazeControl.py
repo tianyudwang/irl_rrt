@@ -530,7 +530,7 @@ if __name__ == "__main__":
     # Extract the relevant information from the environment
     maze_env = env.unwrapped
     maze_task = env.unwrapped._task
-    # agent_model = env.unwrapped.wrapped_env
+    agent_model = env.unwrapped.wrapped_env
     old_sim_state = env.unwrapped.wrapped_env.sim.get_state()
     ic(old_sim_state)
 

@@ -13,7 +13,7 @@ class IRLEnv(gym.Wrapper):
         """
         Override the true environment reward with learned reward
         """
-        obs, reward, done, info = self.env.step(action)
+        obs, _, done, info = self.env.step(action)
         reward = self.reward.reward_fn(self.last_obs, obs)
         self.last_obs = obs.copy()
         return obs, reward, done, info

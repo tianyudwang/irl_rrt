@@ -20,11 +20,11 @@ class NavIRLEnv(gym.Wrapper):
         self.env = env
         self.reward = reward
 
-    def step(self, action):
+    def step(self, action: np.ndarray):
         """
         Override the true environment reward with learned reward
         """
-        obs, reward, done, info = self.env.step(action)
+        obs, _, done, info = self.env.step(action)
         reward = self.reward.reward_fn(self.last_obs, obs)
         self.last_obs = obs.copy()
         return obs, reward, done, info

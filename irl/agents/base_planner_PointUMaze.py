@@ -4,7 +4,6 @@ from typing import Union, Tuple
 
 
 import numpy as np
-
 from mujoco_maze.agent_model import AgentModel
 
 from ompl import util as ou
@@ -48,14 +47,6 @@ def visualize_path(data: np.ndarray, goal=[0, 8]):
     plt.ylim(-4, 12)
     plt.legend()
     plt.show()
-
-
-def setRandomSeed(seed: int) -> None:
-    """Set the random seed"""
-    ou.RNG(seed)
-    random.seed(seed)
-    np.random.seed(seed)
-
 
 def angle_normalize(x: float) -> float:
     return ((x + pi) % (2 * pi)) - pi
@@ -144,6 +135,7 @@ class PointStateValidityChecker(ob.StateValidityChecker):
     ):
         super().__init__(si)
         self.si = si
+        # Point radius
         self.size = 0.5
         # self.x_lim_low = self.y_lim_low = -2
         # self.x_lim_high = self.y_lim_high = 10
@@ -153,6 +145,7 @@ class PointStateValidityChecker(ob.StateValidityChecker):
 
     def isValid(self, state: ob.State) -> bool:
 
+        # Check if the state is in bound first. If not, return False
         if not self.si.satisfiesBounds(state):
             return False
 
@@ -263,6 +256,9 @@ class PointStatePropagator(oc.StatePropagator):
 class BasePlannerPointUMaze:
     def __init__(self, env, use_control=False, log_level=0):
         # TODO: the env might have several wrapper
+        """
+        other_wrapper(<TimeLimit<MazeEnv<PointUMaze-v0>>>)  --> <MazeEnv<PointUMaze-v0>>
+        """
         self.agent_model = env.unwrapped.wrapped_env
 
         # space information
@@ -272,6 +268,7 @@ class BasePlannerPointUMaze:
         # state bound
         state_high = np.array([10, 10, pi, 10, 10, 10])
         state_low = np.array([-2, -2, pi, -10, -10, -10])
+
         # control bound
         self.control_high = np.array([1, 0.25])
         self.control_low = -self.control_high
@@ -347,7 +344,9 @@ class BasePlannerPointUMaze:
             assert s0.ndim == 1
         start_state = ob.State(self.space)
         for i in range(len(s0)):
-            start_state[i] = s0[i]
+            # * Copy an element of an array to a standard Python scalar 
+            # * to ensure C++ can recognize it.
+            start_state[i] = s0[i].item()
         return start_state
 
     def init_simple_setup(self, use_control: bool = False, log_level: int = 0):
@@ -380,6 +379,7 @@ class BasePlannerPointUMaze:
             self.ss.setStatePropagator(propagator)
 
             # Set propagator step size
+            # TODO: (Yifan)
             # ? PropagationStepSize refer to duration in propagation fucntion which is not using.
             self.si.setPropagationStepSize(self.PropagStepSize)  # 0.02 in Mujoco
             self.si.setMinMaxControlDuration(minSteps=1, maxSteps=1)
@@ -395,6 +395,8 @@ class BasePlannerPointUMaze:
         # Set the goal state
         self.goal_state = MazeGoal(self.si, self.goal_pos, self.threshold)
         self.ss.setGoal(self.goal_state)
+
+        # * planner not set in BasePlanner
 
     def update_ss_cost(self, cost_fn):
         # Set up cost function
@@ -479,9 +481,9 @@ class SSTPlanner(BasePlannerPointUMaze):
         return super().control_plan(start_state, solveTime)
 
 
-class RRTstartPlanner(BasePlannerPointUMaze):
+class RRTstarPlanner(BasePlannerPointUMaze):
     def __init__(self, env, log_level: int = 0):
-        super(RRTstartPlanner, self).__init__(env, False, log_level)
+        super(RRTstarPlanner, self).__init__(env, False, log_level)
         self.init_planner()
 
     def init_planner(self):
@@ -513,19 +515,21 @@ def test():
     env = gym.make("PointUMaze-v0")
     print(env.spec.max_episode_steps)
 
-    control_plan = False
+    control_plan = True
 
     if control_plan:
         planner = SSTPlanner(env, log_level=2)
         # RRT can successfully achieved goal but the number of transition.
     else:
-        planner = RRTstartPlanner(env, log_level=2)
+        planner = RRTstarPlanner(env, log_level=2)
 
     # objective = MinimumTransitionObjective(planner.si)
     # planner.ss.setOptimizationObjective(objective)
 
     seed = 0
-    setRandomSeed(seed)
+    ou.RNG(seed)
+    random.seed(seed)
+    np.random.seed(seed)
     env.seed(seed)
 
     err = 0
@@ -557,7 +561,5 @@ def test():
         state = planner.plan(start_state=obs[:-1], solveTime=5)
         visualize_path(state)
 
-
-# if __name__ == "__main__":
-
-#     test()
+# if __name__ == '__main__':
+    # test()

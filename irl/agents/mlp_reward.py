@@ -21,6 +21,7 @@ class MLPReward(nn.Module):
         self.learning_rate = learning_rate
 
         self.mlp = ptu.build_mlp(
+            # The input is current state and next state -> input size = ob_dim + ob_dim
             input_size=self.ob_dim * 2,
             output_size=self.output_size,
             n_layers=self.n_layers,
@@ -41,6 +42,7 @@ class MLPReward(nn.Module):
         This implementation ensures learned cost (-r(x1, x2)) is a metric
         """
         x = torch.cat((ptu.from_numpy(x1), ptu.from_numpy(x2)), dim=-1)
+        # * output of mlp is cost
         r = -self.mlp(x)
 #        h1 = self.mlp(ptu.from_numpy(x1))
 #        h2 = self.mlp(ptu.from_numpy(x2))

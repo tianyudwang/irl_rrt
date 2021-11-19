@@ -1,7 +1,9 @@
 import argparse
 import os
 import sys
+import random
 import time
+import uuid
 from collections import OrderedDict
 
 import gym
@@ -9,11 +11,20 @@ import numpy as np
 import torch
 
 from tqdm import tqdm
+from ompl import util as ou
+
 
 from irl.agents.irl_agent import IRL_Agent
 import irl.scripts.pytorch_util as ptu
 import irl.scripts.utils as utils
 from irl.scripts.logger import Logger
+
+try:
+    from icecream import install  # noqa
+
+    install()
+except ImportError:  # Graceful fallback if IceCream isn't installed.
+    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
 
 # how many rollouts to save as videos to tensorboard
 MAX_NVIDEO = 2
@@ -23,11 +34,15 @@ MAX_VIDEO_LEN = 40  # we overwrite this in the code below
 # we need to patch saved model under python 3.6/3.7 to load them
 NEWER_PYTHON_VERSION = sys.version_info.major == 3 and sys.version_info.minor >= 8
 
-CUSTOM_OBJECTS = {
+CUSTOM_OBJECTS = (
+    {
         "learning_rate": 0.0,
         "lr_schedule": lambda _: 0.0,
         "clip_range": lambda _: 0.0,
-} if NEWER_PYTHON_VERSION else {}
+    }
+    if NEWER_PYTHON_VERSION
+    else {}
+)
 
 
 class Trainer:
@@ -65,8 +80,14 @@ class Trainer:
 
         # Set random seeds
         seed = self.params["seed"]
+        ou.RNG(seed)
+        random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+        
+        
         ptu.init_gpu(use_gpu=not self.params["no_gpu"], gpu_id=self.params["which_gpu"])
 
         # Initialize environment and agent
@@ -80,8 +101,14 @@ class Trainer:
 
         # simulation timestep, will be used for video saving
         self.fps = 10
+        self.save_dir = os.path.join(
+            os.path.dirname(os.path.realpath(__file__)), "../../models"
+        )
 
     def init_env(self):
+        """
+        Initialize the orgianl environment.
+        """
         if self.params["env_name"] == "NavEnv-v0":
             import gym_nav
 
@@ -90,19 +117,27 @@ class Trainer:
             from pendulum_env_wrapper import PendulumWrapper
 
             env = gym.make(self.params["env_name"])
+            # *Note we only modify the Pendulum-v0 to swap the x and y axis.
             self.env = PendulumWrapper(env)
-        
-        elif self.params["env_name"] == "PointUMaze-v0":
-            # v0 adn v1 has different reward function, all others are the same
+
+        elif self.params["env_name"] in ["PointUMaze-v0", "PointUMaze-v1"]:
+            # v0 adn v1 has different reward function.
+            # since we are not using the true rewad, they are the same.
             import mujoco_maze
+            from remove_timeDim_wrapper import RemovTimeFeatureWrapper
+
+            # * This env includes the time at the last axis, which should be removed.
+            # self.env = RemovTimeFeatureWrapper(gym.make(self.params["env_name"]))
             self.env = gym.make(self.params["env_name"])
             
-        
+
         else:
             raise ValueError(f"Environment {self.params['env_name']} is not supported")
 
     def init_agent(self):
-
+        """
+        Initialize the IRL agent.
+        """
         # Are the observations images?
         img = len(self.env.observation_space.shape) > 2
         # Observation and action sizes
@@ -111,11 +146,12 @@ class Trainer:
             if img
             else self.env.observation_space.shape[0]
         )
+        # * We only consider envriment with continuous action space
         ac_dim = self.env.action_space.shape[0]
         self.params["agent_params"]["ac_dim"] = ac_dim
         self.params["agent_params"]["ob_dim"] = ob_dim
 
-        self.agent = IRL_Agent(self.env, self.params["agent_params"])
+        self.agent = IRL_Agent(self.env, self.params["agent_params"], self.params["env_name"])
 
     def training_loop(self):
 
@@ -132,31 +168,40 @@ class Trainer:
 
             # decide if videos should be rendered/logged at this iteration
             self.log_video = all(
-                [(itr + 1) % self.params["video_log_freq"] == 0,
-                self.params["video_log_freq"] != -1,]
+                [
+                    (itr + 1) % self.params["video_log_freq"] == 0,
+                    self.params["video_log_freq"] != -1,
+                ]
             )
 
             # decide if metrics should be logged
             self.logmetrics = all(
-                [(itr + 1) % self.params["scalar_log_freq"] == 0,
-                self.params["scalar_log_freq"] != -1,]
+                [
+                    (itr + 1) % self.params["scalar_log_freq"] == 0,
+                    self.params["scalar_log_freq"] != -1,
+                ]
             )
 
             # Collect agent demonstrations
             agent_paths, train_video_paths = self.collect_agent_trajectories(
                 self.agent.actor, self.params["demo_size"]
             )
+            
             self.agent.add_to_buffer(agent_paths)
 
             # Train Reward
             reward_logs = self.agent.train_reward()
-
+            ic("finshi train rew")
             for step in range(self.params["policy_updates_per_iter"]):
                 policy_logs = self.agent.train_policy()
 
             # log/save
             if self.log_video or self.logmetrics:
-                self.agent.actor.save("../models/SAC_NavEnv-v0_itr_{}".format(itr))
+                self.agent.actor.save(
+                    os.path.join(
+                        self.save_dir, f"SAC_{self.params['env_name']}_itr_{itr}"
+                    )
+                )
                 # perform logging
                 print("\nBeginning logging procedure...")
                 self.perform_logging(
@@ -168,18 +213,41 @@ class Trainer:
                     policy_logs,
                 )
                 if self.params["save_params"]:
-                    self.agent.save(
-                        f"{self.params['logdir']}/agent_itr_{itr}.pt"
-                    )
+                    self.agent.save(f"{self.params['logdir']}/agent_itr_{itr}.pt")
 
-    def collect_demo_trajectories(self, expert_policy, batch_size):
+    def collect_demo_trajectories(self, expert_policy, batch_size: int):
         """
         :param expert_policy:  relative path to saved expert policy
         :return:
             paths: a list of trajectories
         """
-        from stable_baselines3 import SAC
-        expert_policy = SAC.load(expert_policy, device=ptu.device, custom_objects=CUSTOM_OBJECTS)
+
+        assert isinstance(batch_size, int) and batch_size > 0
+        expert_algo = expert_policy[:3].lower()
+
+        if expert_algo == "sac":
+            from stable_baselines3 import SAC
+
+            expert_algo = SAC
+        elif expert_algo == "tqc":
+            from sb3_contrib import TQC
+
+            expert_algo = TQC
+        elif expert_algo == "ppo":
+            from stable_baselines3 import PPO
+
+            expert_algo = PPO
+        else:
+            raise ValueError(f"Expert algorithm {expert_algo} is not supported.")
+        
+        expert_policy = os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            "../../rl-trained-agents",
+            expert_policy,
+        )
+        expert_policy = expert_algo.load(
+            expert_policy, device=ptu.device, custom_objects=CUSTOM_OBJECTS
+        )
         print("\nRunning expert policy to collect demonstrations...")
         demo_paths = utils.sample_trajectories(self.env, expert_policy, batch_size)
         # demo_paths = utils.pad_absorbing_states(demo_paths)
@@ -365,24 +433,36 @@ def main():
     ### CREATE DIRECTORY FOR LOGGING
     ##################################
 
-    data_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "../../data")
+    data_path = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), "../../data"))
 
     if not (os.path.exists(data_path)):
         os.makedirs(data_path)
 
-    logdir = args.env_name + "_" + time.strftime("%d-%m-%Y_%H-%M-%S")
+    logdir = (
+        args.env_name
+        + "_"
+        + time.strftime("%d-%m-%Y_%H-%M-%S")
+        + "_"
+        + f"{uuid.uuid4().hex[:3]}"
+    )
     logdir = os.path.join(data_path, logdir)
     params["logdir"] = logdir
     if not (os.path.exists(logdir)):
         os.makedirs(logdir)
 
-    ###################
-    ### RUN TRAINING
-    ###################
+    #####################
+    ### RUN TRAINING  ###
+    #####################
 
     trainer = Trainer(params)
-    trainer.training_loop()
-
-
+    
+    try:
+        trainer.training_loop()
+    except KeyboardInterrupt:
+        keep = input("\nExiting from training early.\nKeep logs & models? ([y]/n)? ")
+        if keep.lower() in ["n", "no"]:
+            import shutil
+            shutil.rmtree(logdir)
+        
 if __name__ == "__main__":
     main()
