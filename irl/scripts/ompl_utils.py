@@ -96,7 +96,7 @@ def allocateGeometricPlanner(si: ob.SpaceInformation, plannerType: str) -> ob.Pl
     elif plannerType.lower() == "sorrtstar":
         return og.SORRTstar(si)
     else:
-        ou.OMPL_ERROR("Planner-type is not implemented in og allocation function.")
+        ou.OMPL_ERROR(f"Planner-type {plannerType} is not implemented in og allocation function.")
 
 
 def allocateControlPlanner(si: ob.SpaceInformation, plannerType: str) -> ob.Planner:
