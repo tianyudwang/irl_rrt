@@ -20,8 +20,8 @@ class IRL_Agent(BaseAgent):
         env: gym.Env,
         agent_params: dict,
         env_name: str,
+        plannerType: str,
         buffer_size: int = 10_000,
-        control_plan: bool = True,
     ):
         super(IRL_Agent, self).__init__()
 
@@ -46,9 +46,11 @@ class IRL_Agent(BaseAgent):
         self.actor = SAC("MlpPolicy", self.irl_env, verbose=1, device=ptu.device)
 
         self.state_dim = self.agent_params["ob_dim"]
-
         # self.planner = PRMPlanner(self.state_dim, self.bounds, self.goal)
 
+        # choose control planning or geomtric planning
+        use_control_plan = plannerType.lower() in ["sst", "rrt"]    
+    
         if env_name == "NavEnv-v0":
             # TODO: (Yifan) I'm not sure which script is for NavEnv-v0
             pass
@@ -56,23 +58,24 @@ class IRL_Agent(BaseAgent):
         elif env_name == "Pendulum-v0":
             # only implement control plan for pendulum for now
             from irl.agents.base_planner_pendulum import SSTPlanner
-
+            
+            print(f"only implemented SST in {env_name}!")
+            
             self.planner = SSTPlanner()
             print(f"Using SST contol planner in {env_name}...")
-            
-
+        
         elif env_name in ["PointUMaze-v0", "PointUMaze-v1"]:
-            if control_plan:
-                from irl.agents.base_planner_PointUMaze import SSTPlanner
+            if use_control_plan:
+                from irl.agents.base_planner_PointUMaze import ControlPlanner
 
-                self.planner = SSTPlanner(self.env, log_level=2)
-                print(f"Using SST contol planner in {env_name}...")
+                self.planner = ControlPlanner(self.env, plannerType, log_level=2)
+                print(f"Using {plannerType.upper()} contol planner in {env_name}...")
 
             else:
-                from irl.agents.base_planner_PointUMaze import RRTstarPlanner
+                from irl.agents.base_planner_PointUMaze import GeometricPlanner
 
-                self.planner = RRTstarPlanner(self.env, log_level=2)
-                print(f"Using RRTstar geometric planner in {env_name}...")
+                self.planner = GeometricPlanner(self.env, plannerType, log_level=2)
+                print(f"Using {plannerType.upper()} geometric planner in {env_name}...")
                 
 
         # Replay buffer to hold demo transitions (maximum transitions)
@@ -105,9 +108,7 @@ class IRL_Agent(BaseAgent):
             ob, ac, log_probs, rewards, next_ob, done = [
                 var[i] for var in demo_transitions
             ]
-            ic("start first plan")
             path, controls = self.planner.plan(next_ob)
-            ic("end first plan")
             
             path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
             demo_paths.append([path])
@@ -120,7 +121,11 @@ class IRL_Agent(BaseAgent):
                 # Sample agent transitions (s, a, s') at each expert state s
                 agent_ac, _ = self.actor.predict(ob)
                 log_prob = utils.get_log_prob(self.actor, agent_ac)
-                agent_next_ob = self.env.one_step_transition(ob, agent_ac)
+                # TODO: (Yifan)
+                # ? why not call env.step(agent_ac) instead?
+                # agent_next_ob = self.env.one_step_transition(ob, agent_ac)
+                agent_next_ob, *_, = self.env.step(agent_ac)
+                
                 # Find optimal path from s' to goal
                 path, controls = self.planner.plan(agent_next_ob)
 

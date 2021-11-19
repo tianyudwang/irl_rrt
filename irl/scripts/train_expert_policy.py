@@ -6,6 +6,21 @@ import gym
 import numpy as np
 import matplotlib.pyplot as plt
 
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.callbacks import (
+    CallbackList,
+    CheckpointCallback,
+    EvalCallback,
+    StopTrainingOnRewardThreshold,
+)
+
+try:
+    from icecream import install  # noqa
+
+    install()
+except ImportError:  # Graceful fallback if IceCream isn't installed.
+    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
+
 
 def build_env(env_name: str):
     """
@@ -25,34 +40,68 @@ def build_env(env_name: str):
         # v0 adn v1 has different reward function, all others are the same
         import mujoco_maze
         from remove_timeDim_wrapper import RemovTimeFeatureWrapper
-        
+
         # * This env includes the time at the last axis, which should be removed.
         env = RemovTimeFeatureWrapper(gym.make(env_name))
+        ic(env.observation_space)
     else:
         raise ValueError("Environment {} not supported yet ...".format(env_name))
-    return env
+    return Monitor(env)
 
 
 def train_policy(
     env: gym.Env,
+    env_name: str,
     algo: str,
     resume_training: bool,
+    eval_env: Optional[gym.Env] = None,
     device: str = "auto",
     wrapped_time: bool = False,
     policy_name: Optional[str] = None,
     timesteps: int = 100_000,
     learning_rate: float = 3e-4,
     learning_starts: int = 1_000,
+    reward_threshold: Optional[float] = None,
 ):
     """
     Train the expert policy in RL
     """
-    if wrapped_time:
-        from sb3_contrib.common.wrappers import TimeFeatureWrapper
-        # * Note this wrapper will append time to observation which might not work with expert policy
-        env = TimeFeatureWrapper(env)
-        print("Wrapping the env in a TimeFeatureWrapper")
-        
+    # if wrapped_time:
+    #     from sb3_contrib.common.wrappers import TimeFeatureWrapper
+    #     # * Note this wrapper will append time to observation which might not work with expert policy
+    #     env = TimeFeatureWrapper(env)
+    #     print("Wrapping the env in a TimeFeatureWrapper")
+
+    callback = []
+
+    eval_callback_kwargs = dict(
+        eval_env=eval_env,
+        best_model_save_path=f"./logs/{env_name}/{algo}/best_model",
+        log_path=f"./logs/{env_name}/{algo}/results",
+        n_eval_episodes=5,
+        eval_freq=10_000,
+        verbose=1,
+    )
+
+    if reward_threshold is not None:
+        assert isinstance(reward_threshold, (float, int))
+        print(
+            f"Stop training when the model reaches the reward threshold: {reward_threshold}"
+        )
+        # Stop training when the model reaches the reward threshold
+        callback_on_best = StopTrainingOnRewardThreshold(
+            reward_threshold=reward_threshold, verbose=1
+        )
+        eval_callback_kwargs["callback_on_new_best"] = callback_on_best
+
+    # Use deterministic actions for evaluation
+    eval_callback = EvalCallback(**eval_callback_kwargs)
+    callback.append(eval_callback)
+
+    if callback:
+        # Create the callback list if it is not empty
+        callback = CallbackList(callback)
+
     algo = algo.upper()
     if algo in ["SAC", "PPO", "TQC"]:
         if algo == "SAC":
@@ -93,7 +142,7 @@ def train_policy(
             # train_freq=64,
             # use_sde=True,
         )
-    model.learn(total_timesteps=int(timesteps), log_interval=4)
+    model.learn(total_timesteps=int(timesteps), log_interval=4, callback=callback)
 
     return model
 
@@ -124,9 +173,8 @@ def load_policy(algo, model_path, env, device="cpu"):
         algo_cls = TQC
     else:
         raise ValueError(f"RL algorithm {algo} not supported yet ...")
-    
-    
-        
+
+    ic(model_path)
     model = algo_cls.load(model_path, env=env, device=device)
     return model
 
@@ -136,7 +184,6 @@ def visualize_policy(env, model, num_episodes=10, render=True):
     Visualize the policy in env
     """
     # Ensure testing on same device
-
     total_ep_returns = []
     total_ep_lengths = []
 
@@ -185,8 +232,9 @@ def main():
     parser.add_argument("--algo", type=str, default="SAC")
     parser.add_argument("--num_steps", "-n", type=int, default=100_000)
     parser.add_argument("--learning_rate", "-lr", type=float, default=3e-4)
-    parser.add_argument("--learning_starts", "-start", type=float, default=1_000)
-    
+    parser.add_argument("--learning_starts", "-start", type=float, default=10_000)
+    parser.add_argument("--reward_threshold", type=float)
+
     parser.add_argument("--resume_training", action="store_true")
     parser.add_argument("--timeWrapper", "-wrap", action="store_true")
     parser.add_argument("--cuda", action="store_true")
@@ -195,23 +243,36 @@ def main():
     args = parser.parse_args()
 
     env = build_env(args.env_name)
+    eval_env = build_env(args.env_name)
+
     policy_name = args.algo.upper() + "_" + args.env_name
 
     if args.train:
-        print(f"Training {args.algo.upper()} on {args.env_name} with lr = {args.learning_rate}")        
+        print(
+            f"Training {args.algo.upper()} on {args.env_name} with lr = {args.learning_rate}"
+        )
         model = train_policy(
             env,
+            args.env_name,
             args.algo,
             args.resume_training,
+            eval_env=eval_env,
             policy_name=policy_name,
             device="cuda" if args.cuda else "cpu",
             wrapped_time=args.timeWrapper,
             timesteps=args.num_steps,
             learning_rate=args.learning_rate,
             learning_starts=args.learning_starts,
+            reward_threshold=args.reward_threshold,
         )
         save_policy(model, policy_name)
-    model = load_policy(args.algo, policy_name, env, device="cpu")
+
+    # Load policy from file
+
+    model_path = f"./logs/{args.env_name}/{args.algo.lower()}/best_model/best_model"
+    model = load_policy(args.algo, model_path, env, device="cpu")
+
+    # Evaluate the policy and Optionally render the policy
     total_ep_returns = visualize_policy(env, model, render=args.render)
     plt.scatter(range(len(total_ep_returns)), total_ep_returns)
     plt.show()

@@ -11,6 +11,28 @@ from ompl import base as ob
 from ompl import geometric as og
 from ompl import control as oc
 
+def allocateGeometricPlanner(si: ob.SpaceInformation, plannerType: str) -> ob.Planner:
+    """Allocate planner in OMPL Geometric"""
+    # Keep these in alphabetical order and all lower case
+    if plannerType.lower() in ["prmstar", "prm*"]:
+        return og.PRMstar(si)
+    elif plannerType.lower() in ["rrtstar", "rrt*"]:
+        return og.RRTstar(si)
+    else:
+        ou.OMPL_ERROR(f"Planner-type {plannerType} is not implemented.")
+
+
+def allocateControlPlanner(si: ob.SpaceInformation, plannerType: str) -> ob.Planner:
+    """Allocate planner in OMPL Control"""
+    # Keep these in alphabetical order and all lower case
+    if plannerType.lower() == "rrt":
+        return oc.RRT(si)
+    elif plannerType.lower() == "sst":
+        return oc.SST(si)
+    else:
+        ou.OMPL_ERROR(
+            f"Planner-type {plannerType} is not implemented."
+        )
 
 def visualize_path(data: np.ndarray, goal=[0, 8]):
     """
@@ -90,10 +112,17 @@ class IRLCostObjective(ob.OptimizationObjective):
         self.cost_fn = cost_fn
 
     def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
-        x1, y1 = s1[0].getX(), s1[0].getY()
-        x2, y2 = s2[0].getX(), s2[0].getY()
-        s1 = np.array([x1, y1], dtype=np.float64)
-        s2 = np.array([x2, y2], dtype=np.float64)
+        # pos and rot
+        x1, y1, yaw1 = s1[0].getX(), s1[0].getY(), s1[0].getYaw()
+        x2, y2, yaw2 = s2[0].getX(), s2[0].getY(), s2[0].getYaw()
+        # linear and angular velocities
+        x1_dot, y1_dot, yaw1_dot = s1[1][0], s1[1][1], s1[1][2]
+        x2_dot, y2_dot, yaw2_dot = s2[1][0], s2[1][1], s2[1][2]
+        
+        # TODO:
+        # ? Should this be 6D?
+        s1 = np.array([x1, y1, yaw1, x1_dot, y1_dot, yaw1_dot], dtype=np.float64)
+        s2 = np.array([x2, y2, yaw2, x2_dot, y2_dot, yaw2_dot], dtype=np.float64)
         c = self.cost_fn(s1, s2)
         return ob.Cost(c)
 
@@ -255,12 +284,10 @@ class PointStatePropagator(oc.StatePropagator):
 
 class BasePlannerPointUMaze:
     def __init__(self, env, use_control=False, log_level=0):
-        # TODO: the env might have several wrapper
         """
         other_wrapper(<TimeLimit<MazeEnv<PointUMaze-v0>>>)  --> <MazeEnv<PointUMaze-v0>>
         """
         self.agent_model = env.unwrapped.wrapped_env
-
         # space information
         self.state_dim = 6
         self.control_dim = 2
@@ -456,23 +483,24 @@ class BasePlannerPointUMaze:
         solved = self.ss.solve(solveTime)
         if solved:
             geometricPath = self.ss.getSolutionPath()
-            return path_to_numpy(geometricPath, self.state_dim)
+            # Get the states and controls(which is None in og plannig)
+            return path_to_numpy(geometricPath, self.state_dim), None
         else:
             raise ValueError("OMPL is not able to solve under current cost function")
 
 
-class SSTPlanner(BasePlannerPointUMaze):
+class ControlPlanner(BasePlannerPointUMaze):
     """
     Sparse Stable RRT (SST) is an asymptotically near-optimal incremental version of RRT
     """
 
-    def __init__(self, env, log_level: int = 0):
-        super(SSTPlanner, self).__init__(env, True, log_level)
-        self.init_planner()
+    def __init__(self, env, plannerType: str, log_level: int = 0):
+        super(ControlPlanner, self).__init__(env, True, log_level)
+        self.init_planner(plannerType)
 
-    def init_planner(self):
+    def init_planner(self, plannerType: str):
         # Set planner
-        planner = oc.SST(self.si)
+        planner = allocateControlPlanner(self.si, plannerType)
         self.ss.setPlanner(planner)
 
     def plan(
@@ -481,14 +509,14 @@ class SSTPlanner(BasePlannerPointUMaze):
         return super().control_plan(start_state, solveTime)
 
 
-class RRTstarPlanner(BasePlannerPointUMaze):
-    def __init__(self, env, log_level: int = 0):
-        super(RRTstarPlanner, self).__init__(env, False, log_level)
-        self.init_planner()
+class GeometricPlanner(BasePlannerPointUMaze):
+    def __init__(self, env, plannerType: str,  log_level: int = 0):
+        super(GeometricPlanner, self).__init__(env, False, log_level)
+        self.init_planner(plannerType)
 
-    def init_planner(self):
+    def init_planner(self, plannerType: str):
         # Set planner
-        planner = og.RRTstar(self.si)
+        planner = allocateGeometricPlanner(self.si, plannerType)
         self.ss.setPlanner(planner)
 
     def plan(
@@ -518,7 +546,7 @@ def test():
     control_plan = True
 
     if control_plan:
-        planner = SSTPlanner(env, log_level=2)
+        planner = ControlPlanner(env, log_level=2)
         # RRT can successfully achieved goal but the number of transition.
     else:
         planner = RRTstarPlanner(env, log_level=2)

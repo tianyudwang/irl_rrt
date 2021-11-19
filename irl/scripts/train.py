@@ -86,8 +86,7 @@ class Trainer:
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed(seed)
-        
-        
+
         ptu.init_gpu(use_gpu=not self.params["no_gpu"], gpu_id=self.params["which_gpu"])
 
         # Initialize environment and agent
@@ -127,9 +126,8 @@ class Trainer:
             from remove_timeDim_wrapper import RemovTimeFeatureWrapper
 
             # * This env includes the time at the last axis, which should be removed.
-            # self.env = RemovTimeFeatureWrapper(gym.make(self.params["env_name"]))
-            self.env = gym.make(self.params["env_name"])
-            
+            self.env = RemovTimeFeatureWrapper(gym.make(self.params["env_name"]))
+            # self.env = gym.make(self.params["env_name"])
 
         else:
             raise ValueError(f"Environment {self.params['env_name']} is not supported")
@@ -151,7 +149,12 @@ class Trainer:
         self.params["agent_params"]["ac_dim"] = ac_dim
         self.params["agent_params"]["ob_dim"] = ob_dim
 
-        self.agent = IRL_Agent(self.env, self.params["agent_params"], self.params["env_name"])
+        self.agent = IRL_Agent(
+            self.env,
+            self.params["agent_params"],
+            self.params["env_name"],
+            self.params["planner_type"],
+        )
 
     def training_loop(self):
 
@@ -186,12 +189,11 @@ class Trainer:
             agent_paths, train_video_paths = self.collect_agent_trajectories(
                 self.agent.actor, self.params["demo_size"]
             )
-            
+
             self.agent.add_to_buffer(agent_paths)
 
             # Train Reward
             reward_logs = self.agent.train_reward()
-            ic("finshi train rew")
             for step in range(self.params["policy_updates_per_iter"]):
                 policy_logs = self.agent.train_policy()
 
@@ -239,7 +241,7 @@ class Trainer:
             expert_algo = PPO
         else:
             raise ValueError(f"Expert algorithm {expert_algo} is not supported.")
-        
+
         expert_policy = os.path.join(
             os.path.dirname(os.path.realpath(__file__)),
             "../../rl-trained-agents",
@@ -368,6 +370,13 @@ def main():
         default="SAC_NavEnv-v0",
     )
     parser.add_argument(
+        "--planner_type",
+        "-pt",
+        type=str,
+        choices=["rrt", "sst", "rrt*", "rrtstar", "prm*", "prmstar"],
+        required=True,
+    )
+    parser.add_argument(
         "--n_iter", "-n", type=int, default=100, help="Number of total iterations"
     )
     parser.add_argument(
@@ -433,7 +442,9 @@ def main():
     ### CREATE DIRECTORY FOR LOGGING
     ##################################
 
-    data_path = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), "../../data"))
+    data_path = os.path.abspath(
+        os.path.join(os.path.dirname(os.path.realpath(__file__)), "../../data")
+    )
 
     if not (os.path.exists(data_path)):
         os.makedirs(data_path)
@@ -454,15 +465,16 @@ def main():
     ### RUN TRAINING  ###
     #####################
 
-    trainer = Trainer(params)
-    
     try:
+        trainer = Trainer(params)
         trainer.training_loop()
     except KeyboardInterrupt:
         keep = input("\nExiting from training early.\nKeep logs & models? ([y]/n)? ")
         if keep.lower() in ["n", "no"]:
             import shutil
+
             shutil.rmtree(logdir)
-        
+
+
 if __name__ == "__main__":
     main()
