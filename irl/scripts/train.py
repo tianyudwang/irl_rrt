@@ -373,7 +373,7 @@ def main():
         "--planner_type",
         "-pt",
         type=str,
-        choices=["rrt", "sst", "rrt*", "rrtstar", "prm*", "prmstar"],
+        choices=["rrt", "sst", "rrtstar", "prmstar"],
         required=True,
     )
     parser.add_argument(

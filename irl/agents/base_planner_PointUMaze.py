@@ -14,9 +14,9 @@ from ompl import control as oc
 def allocateGeometricPlanner(si: ob.SpaceInformation, plannerType: str) -> ob.Planner:
     """Allocate planner in OMPL Geometric"""
     # Keep these in alphabetical order and all lower case
-    if plannerType.lower() in ["prmstar", "prm*"]:
+    if plannerType.lower() == "prmstar":
         return og.PRMstar(si)
-    elif plannerType.lower() in ["rrtstar", "rrt*"]:
+    elif plannerType.lower() == "rrtstar":
         return og.RRTstar(si)
     else:
         ou.OMPL_ERROR(f"Planner-type {plannerType} is not implemented.")
