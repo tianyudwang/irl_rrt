@@ -121,10 +121,7 @@ class IRL_Agent(BaseAgent):
                 # Sample agent transitions (s, a, s') at each expert state s
                 agent_ac, _ = self.actor.predict(ob)
                 log_prob = utils.get_log_prob(self.actor, agent_ac)
-                # TODO: (Yifan)
-                # ? why not call env.step(agent_ac) instead?
-                # agent_next_ob = self.env.one_step_transition(ob, agent_ac)
-                agent_next_ob, *_, = self.env.step(agent_ac)
+                agent_next_ob = self.env.one_step_transition(ob, agent_ac)
                 
                 # Find optimal path from s' to goal
                 path, controls = self.planner.plan(agent_next_ob)

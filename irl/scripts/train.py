@@ -124,10 +124,10 @@ class Trainer:
             # since we are not using the true rewad, they are the same.
             import mujoco_maze
             from remove_timeDim_wrapper import RemovTimeFeatureWrapper
-
+            from one_step_PointUMaze_wrapper import PointUMazeOneStepTransitionWrapper
             # * This env includes the time at the last axis, which should be removed.
-            self.env = RemovTimeFeatureWrapper(gym.make(self.params["env_name"]))
-            # self.env = gym.make(self.params["env_name"])
+            # wrap the one step transition AFTER time dim is REMOVED.
+            self.env = PointUMazeOneStepTransitionWrapper(RemovTimeFeatureWrapper(gym.make(self.params["env_name"])))
 
         else:
             raise ValueError(f"Environment {self.params['env_name']} is not supported")
