@@ -156,6 +156,24 @@ class MazeGoal(ob.Goal):
         x, y = SE2_state.getX(), SE2_state.getY()
         return np.linalg.norm(self.goal - np.array([x, y])) <= self.threshold
 
+class MazeGoalRegion(ob.GoalSampleableRegion):
+    def __init__(self, si: ob.SpaceInformation, goal: np.ndarray, threshold: float):
+        super(MazeGoalRegion, self).__init__(si)
+        self.goal = goal[:2].flatten()
+        self.threshold = threshold
+    
+    def distanceGoal(self, state):
+        SE2_state = state[0]
+        x, y = SE2_state.getX(), SE2_state.getY()
+        return np.linalg.norm(self.goal - np.array([x, y])).item()
+    
+    def sampleGoal(self, state):
+        state[0].setX(self.goal[0])
+        state[0].setY(self.goal[1])
+    
+    def maxSampleCount(self):
+        return 1
+
 
 class PointStateValidityChecker(ob.StateValidityChecker):
     def __init__(
@@ -420,8 +438,7 @@ class BasePlannerPointUMaze:
         stateValidityChecker = PointStateValidityChecker(self.si)
         self.ss.setStateValidityChecker(stateValidityChecker)
         # Set the goal state
-        self.goal_state = MazeGoal(self.si, self.goal_pos, self.threshold)
-        self.ss.setGoal(self.goal_state)
+        self.ss.setGoal(MazeGoal(self.si, self.goal_pos, self.threshold))
 
         # * planner not set in BasePlanner
 
@@ -535,39 +552,90 @@ class MinimumTransitionObjective(ob.PathLengthOptimizationObjective):
         return ob.Cost(1.0)
 
 
-def test():
+class DummyStartStateValidityChecker:
+    def __init__(
+        self,
+    ):
+        # Point radius
+        self.size = 0.5
+        # self.x_lim_low = self.y_lim_low = -2
+        # self.x_lim_high = self.y_lim_high = 10
+
+        self.Umaze_x_min = self.Umaze_y_min = -2 + self.size
+        self.Umaze_x_max = self.Umaze_y_max = 10 - self.size
+
+    def isValid(self, state: np.ndarray) -> bool:
+
+        #
+
+        x_pos = state[0]
+        y_pos = state[1]
+
+        # In big square contains U with point size constrained
+        inSquare = all(
+            [
+                self.Umaze_x_min <= x_pos <= self.Umaze_x_max,
+                self.Umaze_y_min <= y_pos <= self.Umaze_y_max,
+            ]
+        )
+        if inSquare:
+            # In the middle block cells
+            inMidBlock = (-2 <= x_pos <= 6.5) and (1.5 <= y_pos <= 6.5)
+            if inMidBlock:
+                valid = False
+            else:
+                valid = True
+        # Not in big square
+        else:
+            valid = False
+
+        # Inside empty cell and satisfiedBounds
+        return valid
+
+def test_100(use_control_plan, plannerType, visualize=False):
+    assert plannerType in ["rrt", "sst", "rrtstar", "prmstar"]
     import gym
     import mujoco_maze
     from tqdm import tqdm
 
+    print(f"\nStart testing with {plannerType}...")
     env = gym.make("PointUMaze-v0")
-    print(env.spec.max_episode_steps)
+    print("max_ep_len:", env.spec.max_episode_steps)
 
-    control_plan = True
-
-    if control_plan:
-        planner = ControlPlanner(env, log_level=2)
-        # RRT can successfully achieved goal but the number of transition.
+    if use_control_plan:
+        planner = ControlPlanner(env, plannerType, log_level=1)
     else:
-        planner = RRTstarPlanner(env, log_level=2)
+        planner = GeometricPlanner(env, plannerType, log_level=1)
 
-    # objective = MinimumTransitionObjective(planner.si)
-    # planner.ss.setOptimizationObjective(objective)
 
     seed = 0
     ou.RNG(seed)
     random.seed(seed)
     np.random.seed(seed)
     env.seed(seed)
+    
+    start_checker = DummyStartStateValidityChecker()
 
     err = 0
     excced = 0
-    if control_plan:
+    plan_success = 0
+    if use_control_plan:
 
-        for i in tqdm(range(10), dynamic_ncols=True):
+        for i in tqdm(range(100), dynamic_ncols=True):
             obs = env.reset()
+            
+            
+            while True:
+                x, y = np.random.uniform(-1.5, 9.5, size=2)
+                start = np.array([x, y])
+                valid = start_checker.isValid(state=start)
+                if valid:
+                    obs[:2] = start
+                    break
+                            
             state, controls = planner.plan(start_state=obs[:-1], solveTime=5)
-
+            if visualize:
+                visualize_path(state)
             # Ensure we have the same start position
             env.unwrapped.wrapped_env.set_state(obs[:3], obs[3:-1])
             for i, u in enumerate(controls):
@@ -575,6 +643,7 @@ def test():
 
                 if done:
                     print("Reach Goal. Success!!")
+                    plan_success += 1
                     break
                 if i == len(controls) - 1:
                     print(info)
@@ -586,8 +655,24 @@ def test():
         print("excced", err)
     else:
         obs = env.reset()
-        state = planner.plan(start_state=obs[:-1], solveTime=5)
-        visualize_path(state)
+        while True:
+            x, y = np.random.uniform(-1.5, 9.5, size=2)
+            start = np.array([x, y])
+            valid = start_checker.isValid(state=start)
+            if valid:
+                obs[:2] = start
+                break
+        state, _ = planner.plan(start_state=obs[:-1], solveTime=5)
+        if visualize:
+            visualize_path(state)
 
-# if __name__ == '__main__':
-    # test()
+if __name__ == '__main__':
+    # Test passed
+    # test_100(use_control_plan=True, plannerType="rrt")
+    # test_100(use_control_plan=True, plannerType="sst")
+    # test_100(use_control_plan=False, plannerType="rrtstar")
+    # ! Error:   PRMstar: Unknown type of goal
+    test_100(use_control_plan=False, plannerType="prmstar")
+    
+    
+    
