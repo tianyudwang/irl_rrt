@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 from typing import Optional
 
@@ -43,7 +44,9 @@ def build_env(env_name: str):
 
         # * This env includes the time at the last axis, which should be removed.
         env = RemovTimeFeatureWrapper(gym.make(env_name))
-        ic(env.observation_space)
+    elif env_name in ["AntUMaze-v0", "AntUMaze-v1"]:
+        import mujoco_maze
+        env = gym.make(env_name)
     else:
         raise ValueError("Environment {} not supported yet ...".format(env_name))
     return Monitor(env)
@@ -140,7 +143,7 @@ def train_policy(
             # gradient_steps=64,
             # policy_kwargs=dict(log_std_init=-2, net_arch=[64, 64]),
             # train_freq=64,
-            # use_sde=True,
+            use_sde=True,
         )
     model.learn(total_timesteps=int(timesteps), log_interval=4, callback=callback)
 
@@ -226,7 +229,7 @@ def main():
     parser.add_argument(
         "--env_name",
         type=str,
-        choices=["NavEnv-v0", "Pendulum-v0", "PointUMaze-v0", "PointUMaze-v1"],
+        choices=["NavEnv-v0", "Pendulum-v0", "PointUMaze-v0", "PointUMaze-v1", "AntUMaze-v0", "AntUMaze-v1"],
         required=True,
     )
     parser.add_argument("--algo", type=str, default="SAC")
@@ -269,7 +272,9 @@ def main():
 
     # Load policy from file
 
-    model_path = f"./logs/{args.env_name}/{args.algo.lower()}/best_model/best_model"
+    model_path = os.path.abspath(f"./logs/{args.env_name}/{args.algo}/best_model/best_model")
+    # model_path = os.path.abspath(f"./{args.algo.upper()}_{args.env_name}")
+    
     model = load_policy(args.algo, model_path, env, device="cpu")
 
     # Evaluate the policy and Optionally render the policy

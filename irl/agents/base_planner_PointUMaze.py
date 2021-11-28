@@ -6,38 +6,20 @@ from typing import Union, Tuple
 import numpy as np
 from mujoco_maze.agent_model import AgentModel
 
+from irl.agents.planner_utils import (
+    allocateControlPlanner, 
+    allocateGeometricPlanner,
+    angle_normalize,
+    make_RealVectorBounds,
+    path_to_numpy,
+)
 from ompl import util as ou
 from ompl import base as ob
 from ompl import geometric as og
 from ompl import control as oc
 
-def allocateGeometricPlanner(si: ob.SpaceInformation, plannerType: str) -> ob.Planner:
-    """Allocate planner in OMPL Geometric"""
-    # Keep these in alphabetical order and all lower case
-    if plannerType.lower() == "prmstar":
-        return og.PRMstar(si)
-    elif plannerType.lower() == "rrtstar":
-        return og.RRTstar(si)
-    else:
-        ou.OMPL_ERROR(f"Planner-type {plannerType} is not implemented.")
-
-
-def allocateControlPlanner(si: ob.SpaceInformation, plannerType: str) -> ob.Planner:
-    """Allocate planner in OMPL Control"""
-    # Keep these in alphabetical order and all lower case
-    if plannerType.lower() == "rrt":
-        return oc.RRT(si)
-    elif plannerType.lower() == "sst":
-        return oc.SST(si)
-    else:
-        ou.OMPL_ERROR(
-            f"Planner-type {plannerType} is not implemented."
-        )
 
 def visualize_path(data: np.ndarray, goal=[0, 8]):
-    """
-    From https://ompl.kavrakilab.org/pathVisualization.html
-    """
     from matplotlib import pyplot as plt
 
     fig = plt.figure()
@@ -70,41 +52,8 @@ def visualize_path(data: np.ndarray, goal=[0, 8]):
     plt.legend()
     plt.show()
 
-def angle_normalize(x: float) -> float:
-    return ((x + pi) % (2 * pi)) - pi
-
-
-def make_RealVectorBounds(bounds_dim: int, low, high) -> ob.RealVectorBounds:
-    assert isinstance(bounds_dim, int), "bonds_dim must be an integer"
-    # *OMPL's python binding might not recognize numpy array. convert to list to make it work
-    if isinstance(low, np.ndarray):
-        assert low.ndim == 1
-        low = low.tolist()
-
-    if isinstance(high, np.ndarray):
-        assert high.ndim == 1
-        high = high.tolist()
-    assert isinstance(low, list), "low should be a list or 1D numpy array"
-    assert isinstance(high, list), "high should be a list or 1D numpy array"
-
-    vector_bounds = ob.RealVectorBounds(bounds_dim)
-    for i in range(bounds_dim):
-        vector_bounds.setLow(i, low[i])
-        vector_bounds.setHigh(i, high[i])
-        # Check if the bounds are valid (same length for low and high, high[i] > low[i])
-        vector_bounds.check()
-    return vector_bounds
-
-
-def path_to_numpy(
-    path: Union[og.PathGeometric, oc.PathControl], state_dim: int
-) -> np.ndarray:
-    """Convert OMPL path to numpy array"""
-    assert isinstance(state_dim, int)
-    return np.fromstring(path.printAsMatrix(), dtype=float, sep="\n").reshape(
-        -1, state_dim
-    )
-
+def getIRLCostObjective(si, cost_fn) -> ob.OptimizationObjective:
+    return IRLCostObjective(si, cost_fn)
 
 class IRLCostObjective(ob.OptimizationObjective):
     def __init__(self, si, cost_fn):
@@ -121,15 +70,10 @@ class IRLCostObjective(ob.OptimizationObjective):
         
         # TODO:
         # ? Should this be 6D?
-        s1 = np.array([x1, y1, yaw1, x1_dot, y1_dot, yaw1_dot], dtype=np.float64)
-        s2 = np.array([x2, y2, yaw2, x2_dot, y2_dot, yaw2_dot], dtype=np.float64)
+        s1 = np.array([x1, y1, yaw1, x1_dot, y1_dot, yaw1_dot], dtype=np.float32)
+        s2 = np.array([x2, y2, yaw2, x2_dot, y2_dot, yaw2_dot], dtype=np.float32)
         c = self.cost_fn(s1, s2)
         return ob.Cost(c)
-
-
-def getIRLCostObjective(si, cost_fn) -> ob.OptimizationObjective:
-    return IRLCostObjective(si, cost_fn)
-
 
 class MazeGoal(ob.Goal):
     """
@@ -145,16 +89,16 @@ class MazeGoal(ob.Goal):
         super().__init__(si)
         assert goal.ndim == 1
         self.si = si
-        self.goal = goal[:2]
+        self.goal = goal[:2].flatten()
         self.threshold = threshold
 
     def isSatisfied(self, state: ob.State) -> bool:
         """
         Check if the state is the goal.
         """
-        SE2_state = state[0]
-        x, y = SE2_state.getX(), SE2_state.getY()
-        return np.linalg.norm(self.goal - np.array([x, y])) <= self.threshold
+        # first state is SE2_state
+        x, y = state[0].getX(), state[0].getY()
+        return np.linalg.norm([x - self.goal[0], y - self.goal[1]]) <= self.threshold
 
 class MazeGoalRegion(ob.GoalSampleableRegion):
     def __init__(self, si: ob.SpaceInformation, goal: np.ndarray, threshold: float):
@@ -163,9 +107,9 @@ class MazeGoalRegion(ob.GoalSampleableRegion):
         self.threshold = threshold
     
     def distanceGoal(self, state):
-        SE2_state = state[0]
-        x, y = SE2_state.getX(), SE2_state.getY()
-        return np.linalg.norm(self.goal - np.array([x, y])).item()
+        # first state is SE2
+        x, y = state[0].getX(), state[0].getY()
+        return np.linalg.norm([x - self.goal[0], y - self.goal[1]]).item()
     
     def sampleGoal(self, state):
         state[0].setX(self.goal[0])
@@ -372,9 +316,9 @@ class BasePlannerPointUMaze:
         """
         Create a control space and set the bounds for the control space
         """
-        cspace = oc.RealVectorControlSpace(state_space, 2)
+        cspace = oc.RealVectorControlSpace(state_space, self.control_dim)
         c_bounds = make_RealVectorBounds(
-            bounds_dim=2,
+            bounds_dim=self.control_dim,
             low=self.control_low,
             high=self.control_high,
         )
@@ -424,8 +368,6 @@ class BasePlannerPointUMaze:
             self.ss.setStatePropagator(propagator)
 
             # Set propagator step size
-            # TODO: (Yifan)
-            # ? PropagationStepSize refer to duration in propagation fucntion which is not using.
             self.si.setPropagationStepSize(self.PropagStepSize)  # 0.02 in Mujoco
             self.si.setMinMaxControlDuration(minSteps=1, maxSteps=1)
         else:
@@ -508,7 +450,7 @@ class BasePlannerPointUMaze:
 
 class ControlPlanner(BasePlannerPointUMaze):
     """
-    Sparse Stable RRT (SST) is an asymptotically near-optimal incremental version of RRT
+    Control planning using oc.planner
     """
 
     def __init__(self, env, plannerType: str, log_level: int = 0):
@@ -527,6 +469,9 @@ class ControlPlanner(BasePlannerPointUMaze):
 
 
 class GeometricPlanner(BasePlannerPointUMaze):
+    """
+    Geometric planning using og.planner
+    """
     def __init__(self, env, plannerType: str,  log_level: int = 0):
         super(GeometricPlanner, self).__init__(env, False, log_level)
         self.init_planner(plannerType)
@@ -541,15 +486,6 @@ class GeometricPlanner(BasePlannerPointUMaze):
     ) -> Tuple[np.ndarray, np.ndarray]:
         return super().geometric_plan(start_state, solveTime)
 
-
-class MinimumTransitionObjective(ob.PathLengthOptimizationObjective):
-    """Minimum number of Transitions"""
-
-    def __init__(self, si: Union[oc.SpaceInformation, ob.SpaceInformation]):
-        super(MinimumTransitionObjective, self).__init__(si)
-
-    def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
-        return ob.Cost(1.0)
 
 
 class DummyStartStateValidityChecker:
@@ -668,11 +604,11 @@ def test_100(use_control_plan, plannerType, visualize=False):
 
 if __name__ == '__main__':
     # Test passed
-    # test_100(use_control_plan=True, plannerType="rrt")
+    test_100(use_control_plan=True, plannerType="rrt")
     # test_100(use_control_plan=True, plannerType="sst")
     # test_100(use_control_plan=False, plannerType="rrtstar")
     # ! Error:   PRMstar: Unknown type of goal
-    test_100(use_control_plan=False, plannerType="prmstar")
+    # test_100(use_control_plan=False, plannerType="prmstar")
     
     
     

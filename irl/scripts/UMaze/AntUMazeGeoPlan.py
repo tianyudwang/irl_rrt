@@ -568,6 +568,6 @@ if __name__ == "__main__":
         f.write(geometricPath.printAsMatrix())
 
     # Visualize the path
-    visualize_path(path_name)
+    # visualize_path(path_name)
 
     

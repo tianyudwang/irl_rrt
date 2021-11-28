@@ -17,8 +17,8 @@ class IRLCostObjective(ob.OptimizationObjective):
         self.cost_fn = cost_fn
 
     def motionCost(self, s1, s2):
-        s1 = np.array([s1[0].value, s1[1][0]])
-        s2 = np.array([s2[0].value, s2[1][0]])
+        s1 = np.array([s1[0].value, s1[1][0]], dtype=np.float32)
+        s2 = np.array([s2[0].value, s2[1][0]], dtype=np.float32)
         c = self.cost_fn(s1, s2)
         return ob.Cost(c)
 
