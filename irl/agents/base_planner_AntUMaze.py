@@ -477,6 +477,7 @@ class ControlPlanner(BasePlannerAntUMaze):
     def plan(
         self, start_state: np.ndarray, solveTime: float = 5.0
     ) -> Tuple[np.ndarray, np.ndarray]:
+        raise NotImplementedError("Control planning is still not working.")
         return super().control_plan(start_state, solveTime)
 
 class GeometricPlanner(BasePlannerAntUMaze):
@@ -499,9 +500,9 @@ if __name__ == '__main__':
     import mujoco_maze
     from icecream import ic
     env = gym.make('AntUMaze-v0')
-    # planner = GeometricPlanner(env, plannerType="RRTstar", log_level=2)
+    # planner = ControlPlanner(env, plannerType="RRT", log_level=2)
+    planner = GeometricPlanner(env, plannerType="RRTstar", log_level=2)
     
-    planner = ControlPlanner(env, plannerType="RRT", log_level=2)
     
     obs = env.reset()
     start_state = np.concatenate([obs[:-1]])
