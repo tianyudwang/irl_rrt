@@ -1,18 +1,19 @@
-import random
-from typing import Tuple
+from itertools import chain
+from typing import Tuple, Union
 
 
 import numpy as np
 from mujoco_maze.agent_model import AgentModel
 
 from irl.agents.planner_utils import (
-    allocateControlPlanner, 
+    allocateControlPlanner,
     allocateGeometricPlanner,
     make_RealVectorBounds,
+    baseUMazeGoalState,
+    baseUMazeStateValidityChecker,
     path_to_numpy,
-    printSubspaceInfo,
     copySE3State2Data,
-    copyData2SE3State
+    copyData2SE3State,
 )
 
 from ompl import util as ou
@@ -21,13 +22,12 @@ from ompl import geometric as og
 from ompl import control as oc
 
 
-
 def visualize_path(data: str, goal=[0, 16]):
     """
     From https://ompl.kavrakilab.org/pathVisualization.html
     """
     from matplotlib import pyplot as plt
-    
+
     fig = plt.figure()
     ax = plt.axes(projection="3d")
     # path
@@ -68,158 +68,108 @@ class IRLCostObjective(ob.OptimizationObjective):
         # state = qpos + qvel = 15 + 14 = 29
         s1_temp = np.empty(29, dtype=np.float32)
         s2_temp = np.empty(29, dtype=np.float32)
-                
-        copySE3State2Data(s1[0], s1_temp)
-        copySE3State2Data(s2[0], s2_temp)
-        
+
+        copySE3State2Data(state=s1[0], data=s1_temp)
+        copySE3State2Data(state=s2[0], data=s2_temp)
+
         # joint state and velocity state
         for i in range(7, 15):
-            s1_temp[i] = s1[1][i-7]
-            s2_temp[i] = s2[1][i-7]
-        
+            s1_temp[i] = s1[1][i - 7]
+            s2_temp[i] = s2[1][i - 7]
+
         for j in range(15, 29):
-            s1_temp[j] = s1[2][j-15]
-            s2_temp[j] = s2[2][j-15]
-        
+            s1_temp[j] = s1[2][j - 15]
+            s2_temp[j] = s2[2][j - 15]
+
         c = self.cost_fn(s1_temp, s2_temp)
         # return ob.Cost(c)
-        # TODO: 
+        # TODO:
         return ob.Cost(1.0)
+
 
 def getIRLCostObjective(si, cost_fn) -> ob.OptimizationObjective:
     return IRLCostObjective(si, cost_fn)
 
 
-class MazeGoal(ob.Goal):
-    """
-    An OMPL Goal that satisfy when euclidean dist between state and goal under a threshold
-    """
+class AntUMazeGoalState(baseUMazeGoalState):
+    def __init__(self, si: ob.SpaceInformation, goal: np.ndarray, threshold: float):
+        super(AntUMazeGoalState, self).__init__(si, goal, threshold)
 
-    def __init__(self, si: oc.SpaceInformation, goal: np.ndarray, threshold: float):
-        super().__init__(si)
-        assert goal.ndim == 1
-        self.si = si
-        self.goal = goal[:2].flatten()
-        self.threshold = threshold
+    def sampleGoal(self, state: ob.State) -> None:
 
-    def isSatisfied(self, state: ob.State) -> bool:
-        """
-        Check if the state is the goal.
-        """
-        # first state is R^3
-        x, y = state[0].getX(), state[0].getY()
-        satisfied = np.linalg.norm([x - self.goal[0], y - self.goal[1]]) <= self.threshold
-        return satisfied
+        SE3_goal_data = list(chain(self.goal, [0], [0, 0, 0, 1]))
 
-class AntStateValidityChecker(ob.StateValidityChecker):
+        copyData2SE3State(data=SE3_goal_data, state=state[0])
+
+        # following are dummy values needed for properly setting the goal state
+        # only using x and y to calculate the distance to the goal
+        for i in range(7, 15):
+            state[1][i - 7] = 0
+
+        for j in range(15, 29):
+            state[2][j - 15] = 0
+
+
+class AntStateValidityChecker(baseUMazeStateValidityChecker):
     def __init__(
         self,
-        si,
+        si: Union[oc.SpaceInformation, ob.SpaceInformation],
+        size: float = 0.25 + 2 * 0.08,
+        scaling: float = 8,
     ):
-        super().__init__(si)
-        self.si = si
-        self.size = 0.41  # 0.25 + 2 * 0.08
-
-        self.scaling = 8.0
-        self.x_limits = [-4, 20]
-        self.y_limits = [-4, 20]
-
-        # Taking account the radius of the ant (body + legs) = 0.25 + 2 * 0.08
-        self.Umaze_x_min = self.x_limits[0] + self.size
-        self.Umaze_y_min = self.y_limits[0] + self.size
-        self.Umaze_x_max = self.x_limits[1] - self.size
-        self.Umaze_y_max = self.y_limits[1] - self.size
-
-        self.counter = 0
-
-    def isValid(self, state: ob.State) -> bool:
-        
-        # Check if the state is in bound first. If not, return False
-        if not self.si.satisfiesBounds(state):
-            # qw, qx, qy, qz = state[0].rotation().w, state[0].rotation().x, state[0].rotation().y, state[0].rotation().z
-            # print (np.sum([qw**2, qx**2 , qy**2 , qz**2]))
-            return False
-        
-        R3 = state[0]
-        x_pos = R3.getX()
-        y_pos = R3.getY()
-
-        # In big square contains U with point size constrained
-        inSquare = all(
-            [
-                self.Umaze_x_min <= x_pos <= self.Umaze_x_max,
-                self.Umaze_y_min <= y_pos <= self.Umaze_y_max,
-            ]
-        )
-        if inSquare:
-            inMidBlock = all(
-                [
-                    self.x_limits[0] <= x_pos <= 12.41, #(12 + self.size),
-                    3.59    #(4 - self.size)
-                    <= y_pos
-                    <= 12.41, # 12 + self.size,
-                ]
-            )
-            if inMidBlock:
-                valid = False
-            else:
-                valid = True
-        # Not in big square
-        else:
-            valid = False
-
-        # Inside empty cell
-        return valid 
+        super(AntStateValidityChecker, self).__init__(si, size, scaling)
 
 
 class AntStatePropagator(oc.StatePropagator):
-    def __init__(
-        self, si: oc.SpaceInformation, agent_model: AgentModel
-    ):
+    def __init__(self, si: oc.SpaceInformation, agent_model: AgentModel):
         super().__init__(si)
         self.si = si
         self.agent_model = agent_model
+        import ipdb; ipdb.set_trace()
 
         # A placeholder for qpos, qvel and control in propagte function that don't waste time on numpy creation
         self.qpos_temp = np.zeros(15)
         self.qvel_temp = np.zeros(14)
         self.action_temp = np.zeros(8)
-    
+
     def propagate(
         self, state: ob.State, control: oc.Control, duration: float, result: ob.State
     ) -> None:
         # Copy ompl state to qpos and qvel
-        copySE3State2Data(state[0], self.qpos_temp)
+        copySE3State2Data(state=state[0], data=self.qpos_temp)
         for i in range(7, 15):
-            self.qpos_temp[i] = state[1][i-7]
-        
+            self.qpos_temp[i] = state[1][i - 7]
+
         for j in range(15, 29):
-            self.qvel_temp[j-15] = state[2][j-15]
-        
+            self.qvel_temp[j - 15] = state[2][j - 15]
+
         # copy OMPL contorl to Mujoco (8D)
         for i in range(self.action_temp.shape[0]):
-            self.action_temp[i] = control[i]    
-        
+            self.action_temp[i] = control[i]
+
         # Set qpos and qvel to Mujoco sim state
         self.agent_model.set_state(self.qpos_temp, self.qvel_temp)
         # Simulate in Mujoco
-        self.agent_model.do_simulation(self.action_temp, n_frames=self.agent_model.frame_skip)
+        self.agent_model.do_simulation(
+            self.action_temp, n_frames=self.agent_model.frame_skip
+        )
         # Obtain new qpos and qvel from Mujoco sim
         next_obs = self.agent_model._get_obs()
-        
+
         # Copy qpos and qvel to OMPL state
-        copyData2SE3State(next_obs, result[0])
+        copyData2SE3State(data=next_obs, state=result[0])
         for i in range(7, 15):
-            state[1][i-7] = next_obs[i] 
-        
+            state[1][i - 7] = next_obs[i]
+
         for j in range(15, 29):
-            state[2][j-15] = next_obs[j]
-        
+            state[2][j - 15] = next_obs[j]
+
     def canPropagateBackward(self) -> bool:
         return False
 
     def canSteer(self) -> bool:
         return False
+
 
 class BasePlannerAntUMaze:
     def __init__(self, env, use_control=False, log_level=0):
@@ -227,45 +177,49 @@ class BasePlannerAntUMaze:
         other_wrapper(<TimeLimit<MazeEnv<PointUMaze-v0>>>)  --> <MazeEnv<PointUMaze-v0>>
         """
         self.agent_model = env.unwrapped.wrapped_env
-        
+
         # space information
-        # nq = 15 -> R3 + SO3 + 8D  
+        # nq = 15 -> R3 + SO3 + 8D
         # [x, y, z,
         # qw, qx, qy, qz,
         # hip1, ankle1, hip2, ankle2, hip3, ankle3, hip4, ankle4]
-        
+
         # R3 -> [x, y, z]
         self.R3_high = [20, 20, 1]
-        self.R3_low =  [-4, -4, 0]
-        
+        self.R3_low = [-4, -4, 0]
+
         # q (4 dim) -> [qw, qx, qy, qz]
         self.unit_quaternion_high = [1, 1, 1, 1]
-        self.unit_quaternion_low  = [-1, -1, -1, -1]
-        
+        self.unit_quaternion_low = [-1, -1, -1, -1]
+
         # 8 Joints
-        
+
         # self.joints_high = [0.656203,  1.3356,    0.665058,  0.1000,   0.666901,   0.099308,   0.657522,   1.334417]
-        # self.joints_low =  [-0.663243, -0.09996, -0.661253, -1.32870, -0.658905	, -1.34018, -0.656940, -0.09989]        
-        
-        self.joints_high = np.deg2rad([ 38,  76.5,  38,  5.73, 38,  5.73,  38, 76.5])
-        self.joints_low =  np.deg2rad([-38, -5.73, -38, -76.5, -38, -76.5, -38, -5.73])
-        
+        # self.joints_low =  [-0.663243, -0.09996, -0.661253, -1.32870, -0.658905	, -1.34018, -0.656940, -0.09989]
+
+        self.joints_high = np.deg2rad([38, 76.5, 38, 5.73, 38, 5.73, 38, 76.5])
+        self.joints_low = np.deg2rad([-38, -5.73, -38, -76.5, -38, -76.5, -38, -5.73])
+
         # self.joints_high = np.deg2rad([30, 70, 30, -30, 30, -30, 30, 70])
         # self.joints_low =  np.deg2rad([-30, 30, -30,-70, -30,-70, -30, 30])
-        
-        self.qpos_high = np.concatenate([self.R3_high, self.unit_quaternion_high, self.joints_high])
-        self.qpos_low = np.concatenate([self.R3_low, self.unit_quaternion_low, self.joints_low])
-        
+
+        self.qpos_high = np.concatenate(
+            [self.R3_high, self.unit_quaternion_high, self.joints_high]
+        )
+        self.qpos_low = np.concatenate(
+            [self.R3_low, self.unit_quaternion_low, self.joints_low]
+        )
+
         # nv = 14
         # [x_dot, y_dot, z_dot, qx_dot, qy_dot, qz_dot,
         # hip1_dot, ankle1_dot, hip2_dot, ankle2_dot, hip3_dot, ankle3_dot, hip4_dot, ankle4_dot]
         self.qvel_high = np.ones(14) * 10
         self.qvel_low = -self.qvel_high
-        
+
         # nu = 8
         # [hip_4, ankle_4, hip_1, ankle_1, hip_2, ankle_2, hip_3, ankle_3]
         # ? what does u represents? torque?
-        
+
         # ======================================================================================
         self.state_dim = 15 + 14
         self.control_dim = 8
@@ -273,7 +227,7 @@ class BasePlannerAntUMaze:
         # state bound
         self.state_high = np.concatenate([self.qpos_high, self.qvel_high])
         self.state_low = np.concatenate([self.qpos_low, self.qvel_low])
-        
+
         # control bound
         self.control_high = np.ones(8) * 30
         self.control_low = -self.control_high
@@ -289,7 +243,7 @@ class BasePlannerAntUMaze:
     @property
     def PropagStepSize(self) -> float:
         return self.agent_model.sim.model.opt.timestep
-    
+
     def makeStateSpace(self, lock: bool = True) -> ob.StateSpace:
         """
         Create a state space.
@@ -312,7 +266,7 @@ class BasePlannerAntUMaze:
             high=self.joints_high,
         )
         joint_space.setBounds(J_bounds)
-        
+
         # velocity space (R3 + SO3 + 8D) -> 14D
         velocity_space = ob.RealVectorStateSpace(14)
         v_bounds = make_RealVectorBounds(
@@ -328,14 +282,11 @@ class BasePlannerAntUMaze:
         space.addSubspace(joint_space, 1.0)
         space.addSubspace(velocity_space, 1.0)
 
-        # print space information
-        # printSubspaceInfo(space)
-        
         # Lock this state space. This means no further spaces can be added as components.
         if space.isCompound() and lock:
             space.lock()
         return space
-    
+
     def makeStartState(self, s0: np.ndarray) -> ob.State:
         """
         Create a start state.
@@ -343,20 +294,22 @@ class BasePlannerAntUMaze:
         if isinstance(s0, np.ndarray):
             assert s0.ndim == 1
         start_state = ob.State(self.space)
-        
+
         # * Quaternion q = w + xi + yj + zk
         # * Mujoco is [w,x,y,z] while OMPL order is [x,y,z,w], so we swap state[3] and state[6]
         state_tmp = s0.copy()
         state_tmp[3], state_tmp[6] = state_tmp[6], state_tmp[3]
-        
+
         for i in range(len(s0)):
-            # * Copy an element of an array to a standard Python scalar 
+            # * Copy an element of an array to a standard Python scalar
             # * to ensure C++ can recognize it.
-            assert self.state_low[i] <= state_tmp[i] <= self.state_high[i], f"Index {i}: {[self.state_low[i], self.state_high[i]]}: {state_tmp[i]}"
-            
+            assert (
+                self.state_low[i] <= state_tmp[i] <= self.state_high[i]
+            ), f"Index {i}: {[self.state_low[i], self.state_high[i]]}: {state_tmp[i]}"
+
             start_state[i] = state_tmp[i].item()
         return start_state
-    
+
     def makeControlSpace(self, state_space: ob.StateSpace) -> oc.ControlSpace:
         """
         Create a control space and set the bounds for the control space
@@ -369,7 +322,7 @@ class BasePlannerAntUMaze:
         )
         cspace.setBounds(c_bounds)
         return cspace
-    
+
     def init_simple_setup(self, use_control: bool = False, log_level: int = 0):
         """
         Initialize an ompl::control::SimpleSetup instance
@@ -395,7 +348,7 @@ class BasePlannerAntUMaze:
             self.ss = oc.SimpleSetup(self.cspace)
             # Retrieve current instance of Space Information
             self.si = self.ss.getSpaceInformation()
-            
+
             # Set State Propagator
             propagator = AntStatePropagator(self.si, self.agent_model)
             self.ss.setStatePropagator(propagator)
@@ -413,8 +366,9 @@ class BasePlannerAntUMaze:
         stateValidityChecker = AntStateValidityChecker(self.si)
         self.ss.setStateValidityChecker(stateValidityChecker)
         # Set the goal state
-        self.ss.setGoal(MazeGoal(self.si, self.goal_pos, self.threshold))
-    
+        goal_state = AntUMazeGoalState(self.si, self.goal_pos, self.threshold)
+        self.ss.setGoal(goal_state)
+
     def clearDataAndSetStartState(self, s0: np.ndarray):
         """
         Clear previous planning computation data, does not affect settings and start/goal
@@ -424,7 +378,7 @@ class BasePlannerAntUMaze:
         # Reset the start state
         start = self.makeStartState(s0)
         self.ss.setStartState(start)
-    
+
     def control_plan(
         self, start_state: np.ndarray, solveTime: float = 5.0
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -437,15 +391,20 @@ class BasePlannerAntUMaze:
         if solved:
             control_path = self.ss.getSolutionPath()
             geometricPath = control_path.asGeometric()
-            states = path_to_numpy(geometricPath, state_dim=self.state_dim)
-            controls = np.asarray(
-                [[u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]] for u in control_path.getControls()], dtype=np.float32
+            states = path_to_numpy(
+                geometricPath, state_dim=self.state_dim, dtype=np.float32
             )
-            ic()
+            controls = np.asarray(
+                [
+                    [u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]]
+                    for u in control_path.getControls()
+                ],
+                dtype=np.float32,
+            )
             return states, controls
         else:
             raise ValueError("OMPL is not able to solve under current cost function")
-    
+
     def geometric_plan(
         self, start_state: np.ndarray, solveTime: float = 5.0
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -457,10 +416,13 @@ class BasePlannerAntUMaze:
         solved = self.ss.solve(solveTime)
         if solved:
             geometricPath = self.ss.getSolutionPath()
-            # Get the states and controls(which is None in og plannig)
-            return path_to_numpy(geometricPath, self.state_dim), None
+            states = path_to_numpy(geometricPath, self.state_dim, dtype=np.float32)
+            controls = None
+            # Return the states and controls(which is None in og plannig)
+            return states, controls
         else:
             raise ValueError("OMPL is not able to solve under current cost function")
+
 
 class ControlPlanner(BasePlannerAntUMaze):
     """
@@ -482,8 +444,9 @@ class ControlPlanner(BasePlannerAntUMaze):
         raise NotImplementedError("Control planning is still not working.")
         return super().control_plan(start_state, solveTime)
 
+
 class GeometricPlanner(BasePlannerAntUMaze):
-    def __init__(self, env, plannerType: str,  log_level: int = 0):
+    def __init__(self, env, plannerType: str, log_level: int = 0):
         super(GeometricPlanner, self).__init__(env, False, log_level)
         self.init_planner(plannerType)
 
@@ -497,23 +460,19 @@ class GeometricPlanner(BasePlannerAntUMaze):
     ) -> Tuple[np.ndarray, np.ndarray]:
         return super().geometric_plan(start_state, solveTime)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     import gym
     import mujoco_maze
-    from icecream import ic
-    env = gym.make('AntUMaze-v0')
+
+    env = gym.make("AntUMaze-v0")
     # planner = ControlPlanner(env, plannerType="RRT", log_level=2)
     planner = GeometricPlanner(env, plannerType="RRTstar", log_level=2)
-    
-    
+
     obs = env.reset()
     start_state = np.concatenate([obs[:-1]])
-    ic(start_state.reshape(-1, 1))
-    
-    state, _ = planner.plan(start_state, 60)
-    ic(state.shape)
-    
+
+    state, _ = planner.plan(start_state, 5)
+    print(state.shape)
+
     visualize_path(state)
-
-
- 

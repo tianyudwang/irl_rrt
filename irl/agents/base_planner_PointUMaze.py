@@ -1,4 +1,3 @@
-import random
 from math import pi, sin, cos
 from typing import Union, Tuple
 
@@ -7,9 +6,13 @@ import numpy as np
 from mujoco_maze.agent_model import AgentModel
 
 from irl.agents.planner_utils import (
-    allocateControlPlanner, 
+    allocateControlPlanner,
     allocateGeometricPlanner,
     angle_normalize,
+    baseUMazeGoalState,
+    baseUMazeStateValidityChecker,
+    copyData2SE2State,
+    copySE2State2Data,
     make_RealVectorBounds,
     path_to_numpy,
 )
@@ -52,120 +55,63 @@ def visualize_path(data: np.ndarray, goal=[0, 8]):
     plt.legend()
     plt.show()
 
+
 def getIRLCostObjective(si, cost_fn) -> ob.OptimizationObjective:
     return IRLCostObjective(si, cost_fn)
+
 
 class IRLCostObjective(ob.OptimizationObjective):
     def __init__(self, si, cost_fn):
         super(IRLCostObjective, self).__init__(si)
         self.cost_fn = cost_fn
 
+        self.s1_data = np.empty(6, dtype=np.float32)
+        self.s2_data = np.empty(6, dtype=np.float32)
+
     def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
         # pos and rot
-        x1, y1, yaw1 = s1[0].getX(), s1[0].getY(), s1[0].getYaw()
-        x2, y2, yaw2 = s2[0].getX(), s2[0].getY(), s2[0].getYaw()
+        copySE2State2Data(data=self.s1_data, state=s1[0])
+        copySE2State2Data(data=self.s2_data, state=s2[0])
+
+        for i in range(3):
+            self.s1_data[i] = s1[1][i]
+            self.s2_data[i] = s2[1][i]
+
+        # x1, y1, yaw1 = s1[0].getX(), s1[0].getY(), s1[0].getYaw()
+        # x2, y2, yaw2 = s2[0].getX(), s2[0].getY(), s2[0].getYaw()
+
         # linear and angular velocities
-        x1_dot, y1_dot, yaw1_dot = s1[1][0], s1[1][1], s1[1][2]
-        x2_dot, y2_dot, yaw2_dot = s2[1][0], s2[1][1], s2[1][2]
-        
+        # x1_dot, y1_dot, yaw1_dot = s1[1][0], s1[1][1], s1[1][2]
+        # x2_dot, y2_dot, yaw2_dot = s2[1][0], s2[1][1], s2[1][2]
+
         # TODO:
         # ? Should this be 6D?
-        s1 = np.array([x1, y1, yaw1, x1_dot, y1_dot, yaw1_dot], dtype=np.float32)
-        s2 = np.array([x2, y2, yaw2, x2_dot, y2_dot, yaw2_dot], dtype=np.float32)
+        # ? Do we need to ensure s1 and s2 has dtype float32?
         c = self.cost_fn(s1, s2)
         return ob.Cost(c)
 
-class MazeGoal(ob.Goal):
-    """
-    An OMPL Goal that satisfy when euclidean dist between state and goal under a threshold
-    """
 
-    def __init__(
-        self,
-        si: Union[oc.SpaceInformation, ob.SpaceInformation],
-        goal: np.ndarray,
-        threshold: float,
-    ):
-        super().__init__(si)
-        assert goal.ndim == 1
-        self.si = si
-        self.goal = goal[:2].flatten()
-        self.threshold = threshold
-
-    def isSatisfied(self, state: ob.State) -> bool:
-        """
-        Check if the state is the goal.
-        """
-        # first state is SE2_state
-        x, y = state[0].getX(), state[0].getY()
-        return np.linalg.norm([x - self.goal[0], y - self.goal[1]]) <= self.threshold
-
-class MazeGoalRegion(ob.GoalSampleableRegion):
+class PointUMazeGoalState(baseUMazeGoalState):
     def __init__(self, si: ob.SpaceInformation, goal: np.ndarray, threshold: float):
-        super(MazeGoalRegion, self).__init__(si)
-        self.goal = goal[:2].flatten()
-        self.threshold = threshold
-    
-    def distanceGoal(self, state):
-        # first state is SE2
-        x, y = state[0].getX(), state[0].getY()
-        return np.linalg.norm([x - self.goal[0], y - self.goal[1]]).item()
-    
-    def sampleGoal(self, state):
-        state[0].setX(self.goal[0])
-        state[0].setY(self.goal[1])
-    
-    def maxSampleCount(self):
-        return 1
+        super(PointUMazeGoalState, self).__init__(si, goal, threshold)
+
+    def sampleGoal(self, state: ob.State) -> None:
+        state[0].setXY(self.goal[0], self.goal[1])
+        # following are dummy values needed for properly setting the goal state
+        # only using x and y to calculate the distance to the goal
+        state[0].setYaw(0)
+        for i in range(3):
+            state[1][i] = 0
 
 
-class PointStateValidityChecker(ob.StateValidityChecker):
+class PointStateValidityChecker(baseUMazeStateValidityChecker):
     def __init__(
         self,
         si: Union[oc.SpaceInformation, ob.SpaceInformation],
+        size: float = 0.5,
+        scaling: float = 4,
     ):
-        super().__init__(si)
-        self.si = si
-        # Point radius
-        self.size = 0.5
-        # self.x_lim_low = self.y_lim_low = -2
-        # self.x_lim_high = self.y_lim_high = 10
-
-        self.Umaze_x_min = self.Umaze_y_min = -2 + self.size
-        self.Umaze_x_max = self.Umaze_y_max = 10 - self.size
-
-    def isValid(self, state: ob.State) -> bool:
-
-        # Check if the state is in bound first. If not, return False
-        if not self.si.satisfiesBounds(state):
-            return False
-
-        SE2_state = state[0]
-        assert isinstance(SE2_state, ob.SE2StateSpace.SE2StateInternal)
-
-        x_pos = SE2_state.getX()
-        y_pos = SE2_state.getY()
-
-        # In big square contains U with point size constrained
-        inSquare = all(
-            [
-                self.Umaze_x_min <= x_pos <= self.Umaze_x_max,
-                self.Umaze_y_min <= y_pos <= self.Umaze_y_max,
-            ]
-        )
-        if inSquare:
-            # In the middle block cells
-            inMidBlock = (-2 <= x_pos <= 6.5) and (1.5 <= y_pos <= 6.5)
-            if inMidBlock:
-                valid = False
-            else:
-                valid = True
-        # Not in big square
-        else:
-            valid = False
-
-        # Inside empty cell and satisfiedBounds
-        return valid
+        super(PointStateValidityChecker, self).__init__(si, size, scaling)
 
 
 class PointStatePropagator(oc.StatePropagator):
@@ -194,13 +140,10 @@ class PointStatePropagator(oc.StatePropagator):
         # V_state: qvel = [vx, vy, w]
         V_state = state[1]
 
-        self.qpos_temp[0] = SE2_state.getX()
-        self.qpos_temp[1] = SE2_state.getY()
-        self.qpos_temp[2] = SE2_state.getYaw()
+        copySE2State2Data(state=SE2_state, data=self.qpos_temp)
 
-        self.qvel_temp[0] = V_state[0]
-        self.qvel_temp[1] = V_state[1]
-        self.qvel_temp[2] = V_state[2]
+        for i in range(3):
+            self.qvel_temp[i] = V_state[i]
 
         self.qpos_temp[2] += control[1]
         # Normalize orientation to be in [-pi, pi], since it is SO2
@@ -228,14 +171,12 @@ class PointStatePropagator(oc.StatePropagator):
 
         # Copy Mujoco State to OMPL
         # next SE2_state: next_qpos = [x, y, Yaw]
-        result[0].setX(next_obs[0])
-        result[0].setY(next_obs[1])
-        result[0].setYaw(next_obs[2])
+
+        copyData2SE2State(state=result[0], data=next_obs[:3])
 
         # next V_state: next_qvel = [vx, vy, w]
-        result[1][0] = next_obs[3]
-        result[1][1] = next_obs[4]
-        result[1][2] = next_obs[5]
+        for i in range(3):
+            result[1][i] = next_obs[3 + i]
 
     def canPropagateBackward(self) -> bool:
         return False
@@ -333,7 +274,7 @@ class BasePlannerPointUMaze:
             assert s0.ndim == 1
         start_state = ob.State(self.space)
         for i in range(len(s0)):
-            # * Copy an element of an array to a standard Python scalar 
+            # * Copy an element of an array to a standard Python scalar
             # * to ensure C++ can recognize it.
             start_state[i] = s0[i].item()
         return start_state
@@ -380,7 +321,8 @@ class BasePlannerPointUMaze:
         stateValidityChecker = PointStateValidityChecker(self.si)
         self.ss.setStateValidityChecker(stateValidityChecker)
         # Set the goal state
-        self.ss.setGoal(MazeGoal(self.si, self.goal_pos, self.threshold))
+        goal_state = PointUMazeGoalState(self.si, self.goal_pos, self.threshold)
+        self.ss.setGoal(goal_state)
 
         # * planner not set in BasePlanner
 
@@ -410,19 +352,9 @@ class BasePlannerPointUMaze:
         solved = self.ss.solve(solveTime)
         if solved:
             control_path = self.ss.getSolutionPath()
-            states = np.asarray(
-                [
-                    [
-                        state[0].getX(),
-                        state[0].getY(),
-                        state[0].getYaw(),
-                        state[1][0],
-                        state[1][1],
-                        state[1][2],
-                    ]
-                    for state in control_path.getStates()
-                ],
-                dtype=np.float32,
+            geometricPath = control_path.asGeometric()
+            states = path_to_numpy(
+                geometricPath, state_dim=self.state_dim, dtype=np.float32
             )
             controls = np.asarray(
                 [[u[0], u[1]] for u in control_path.getControls()], dtype=np.float32
@@ -442,8 +374,10 @@ class BasePlannerPointUMaze:
         solved = self.ss.solve(solveTime)
         if solved:
             geometricPath = self.ss.getSolutionPath()
-            # Get the states and controls(which is None in og plannig)
-            return path_to_numpy(geometricPath, self.state_dim), None
+            states = path_to_numpy(geometricPath, self.state_dim, dtype=np.float32)
+            controls = None
+            # return the states and controls(which is None in og plannig)
+            return states, controls
         else:
             raise ValueError("OMPL is not able to solve under current cost function")
 
@@ -472,7 +406,8 @@ class GeometricPlanner(BasePlannerPointUMaze):
     """
     Geometric planning using og.planner
     """
-    def __init__(self, env, plannerType: str,  log_level: int = 0):
+
+    def __init__(self, env, plannerType: str, log_level: int = 0):
         super(GeometricPlanner, self).__init__(env, False, log_level)
         self.init_planner(plannerType)
 
@@ -485,7 +420,6 @@ class GeometricPlanner(BasePlannerPointUMaze):
         self, start_state: np.ndarray, solveTime: float = 5
     ) -> Tuple[np.ndarray, np.ndarray]:
         return super().geometric_plan(start_state, solveTime)
-
 
 
 class DummyStartStateValidityChecker:
@@ -528,8 +462,11 @@ class DummyStartStateValidityChecker:
         # Inside empty cell and satisfiedBounds
         return valid
 
+
 def test_100(use_control_plan, plannerType, visualize=False):
     assert plannerType in ["rrt", "sst", "rrtstar", "prmstar"]
+
+    import random
     import gym
     import mujoco_maze
     from tqdm import tqdm
@@ -543,13 +480,12 @@ def test_100(use_control_plan, plannerType, visualize=False):
     else:
         planner = GeometricPlanner(env, plannerType, log_level=1)
 
-
     seed = 0
     ou.RNG(seed)
     random.seed(seed)
     np.random.seed(seed)
     env.seed(seed)
-    
+
     start_checker = DummyStartStateValidityChecker()
 
     err = 0
@@ -559,8 +495,7 @@ def test_100(use_control_plan, plannerType, visualize=False):
 
         for i in tqdm(range(100), dynamic_ncols=True):
             obs = env.reset()
-            
-            
+
             while True:
                 x, y = np.random.uniform(-1.5, 9.5, size=2)
                 start = np.array([x, y])
@@ -568,7 +503,7 @@ def test_100(use_control_plan, plannerType, visualize=False):
                 if valid:
                     obs[:2] = start
                     break
-                            
+
             state, controls = planner.plan(start_state=obs[:-1], solveTime=5)
             if visualize:
                 visualize_path(state)
@@ -602,13 +537,10 @@ def test_100(use_control_plan, plannerType, visualize=False):
         if visualize:
             visualize_path(state)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # Test passed
-    test_100(use_control_plan=True, plannerType="rrt")
+    # test_100(use_control_plan=True, plannerType="rrt")
     # test_100(use_control_plan=True, plannerType="sst")
-    # test_100(use_control_plan=False, plannerType="rrtstar")
-    # ! Error:   PRMstar: Unknown type of goal
-    # test_100(use_control_plan=False, plannerType="prmstar")
-    
-    
-    
+    # test_100(use_control_plan=False, plannerType="rrtstar", visualize=True)
+    test_100(use_control_plan=False, plannerType="prmstar", visualize=True)

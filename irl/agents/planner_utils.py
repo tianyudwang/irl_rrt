@@ -10,6 +10,102 @@ from ompl import geometric as og
 from ompl import control as oc
 
 
+class baseUMazeGoalState(ob.GoalState):
+    """
+    ompl::base::GoalState (inherits from ompl::base::GoalSampleableRegion) stores one state as the goal.
+    Sampling the goal state will always return this state
+    and the distance to the goal is implemented by calling ompl::base::StateSpace::distance()
+    between the stored goal state and the state passed to ompl::base::GoalRegion::distanceGoal().
+    """
+
+    def __init__(self, si: ob.SpaceInformation, goal: np.ndarray, threshold: float):
+        super().__init__(si)
+
+        self.si = si
+        self.goal = goal[:2].flatten().tolist()
+        self.threshold = threshold
+
+        # Set goal threshold
+        self.setThreshold(self.threshold)
+        assert self.getThreshold() == self.threshold
+
+    def distanceGoal(self, state: ob.State) -> float:
+        """
+        Compute the distance to the goal.
+        """
+        return np.linalg.norm(
+            [state[0].getX() - self.goal[0], state[0].getY() - self.goal[1]]
+        )
+
+    def sampleGoal(self, state: ob.State) -> None:
+        raise NotImplementedError("Need to specified goal state according to Env")
+
+
+class baseUMazeStateValidityChecker(ob.StateValidityChecker):
+    def __init__(
+        self,
+        si,
+        size: float,
+        scaling: float,
+    ):
+        super().__init__(si)
+        self.si = si
+        # radius of agent (consider as a sphere)
+        self.size = size
+
+        unitXMin = unitYMin = -0.5
+        unitXMax = unitYMax = 2.5
+
+        unitMidBlockXMin = -0.5
+        unitMidBlockXMax = 1.5
+        unitMidBlockYMin = 0.5
+        unitMidBlockYMax = 1.5
+
+        self.scaling = scaling  # 8.0
+        self.Umaze_x_min = self.Umaze_y_min = unitXMin * self.scaling + self.size
+        self.Umaze_x_max = self.Umaze_y_max = unitXMax * self.scaling - self.size
+
+        self.midBlock_x_min = unitMidBlockXMin * self.scaling
+        self.midBlock_x_max = unitMidBlockXMax * self.scaling + self.size
+
+        self.midBlock_y_min = unitMidBlockYMin * self.scaling - self.size
+        self.midBlock_y_max = unitMidBlockYMax * self.scaling + self.size
+
+    def isValid(self, state: ob.State) -> bool:
+
+        # Check if the state is in bound first. If not, return False
+        if not self.si.satisfiesBounds(state):
+            return False
+
+        x_pos = state[0].getX()
+        y_pos = state[0].getY()
+
+        # In big square contains U with point size constrained
+        inSquare = all(
+            [
+                self.Umaze_x_min <= x_pos <= self.Umaze_x_max,
+                self.Umaze_y_min <= y_pos <= self.Umaze_y_max,
+            ]
+        )
+        if inSquare:
+            inMidBlock = all(
+                [
+                    self.midBlock_x_min <= x_pos <= self.midBlock_x_max,
+                    self.midBlock_y_min <= y_pos <= self.midBlock_y_max,
+                ]
+            )
+            if inMidBlock:
+                valid = False
+            else:
+                valid = True
+        # Not in big square
+        else:
+            valid = False
+
+        # Inside empty cell
+        return valid
+
+
 def allocateGeometricPlanner(si: ob.SpaceInformation, plannerType: str) -> ob.Planner:
     """Allocate planner in OMPL Geometric"""
     # Keep these in alphabetical order and all lower case
@@ -29,9 +125,8 @@ def allocateControlPlanner(si: ob.SpaceInformation, plannerType: str) -> ob.Plan
     elif plannerType.lower() == "sst":
         return oc.SST(si)
     else:
-        ou.OMPL_ERROR(
-            f"Planner-type {plannerType} is not implemented."
-        )
+        ou.OMPL_ERROR(f"Planner-type {plannerType} is not implemented.")
+
 
 def angle_normalize(x: float) -> float:
     return ((x + pi) % (2 * pi)) - pi
@@ -60,13 +155,14 @@ def make_RealVectorBounds(bounds_dim: int, low, high) -> ob.RealVectorBounds:
 
 
 def path_to_numpy(
-    path: Union[og.PathGeometric, oc.PathControl], state_dim: int, dtype=np.float32
+    path: Union[og.PathGeometric, oc.PathControl], state_dim: int, dtype: np.dtype
 ) -> np.ndarray:
     """Convert OMPL path to numpy array"""
     assert isinstance(state_dim, int)
     return np.fromstring(path.printAsMatrix(), dtype=dtype, sep="\n").reshape(
         -1, state_dim
     )
+
 
 def printSubspaceInfo(
     space: ob.CompoundStateSpace,
@@ -88,17 +184,17 @@ def printSubspaceInfo(
             low, high = [[-np.pi], [np.pi]]
 
         elif isinstance(subspace, ob.SO3StateSpace):
-            low, high = [None]*4, [None]*4       
-        
+            low, high = [None] * 4, [None] * 4
+
         elif isinstance(subspace, ob.SE2StateSpace):
             low, high = subspace.getBounds().low, subspace.getBounds().high
             # SO2 bound is not inluded in bounds manually add it for visualization
             low.append(-np.pi)
             high.append(np.pi)
-        
+
         elif isinstance(subspace, ob.SE3StateSpace):
             low, high = subspace.getBounds().low, subspace.getBounds().high
-        
+
         for j in range(len(low)):
             print(f"  {k}|{i}: {name}[{j}]\t[{low[j]}, {high[j]}]")
             if start is not None:
@@ -108,7 +204,7 @@ def printSubspaceInfo(
                     + f"at subspace ({i}) with inner index ({j})."
                 )
             last_subspace_idx += 1
-            k+=1
+            k += 1
 
     return space_dict
 
@@ -122,6 +218,7 @@ def copyR3State2Data(state: ob.State, data: np.ndarray) -> None:
     data[1] = state.getY()
     data[2] = state.getZ()
 
+
 def copySO3State2Data(state: ob.State, data: np.ndarray) -> None:
     """
     Copy SO3 state to data (modified in place)
@@ -133,6 +230,7 @@ def copySO3State2Data(state: ob.State, data: np.ndarray) -> None:
     data[2] = state.y
     data[3] = state.z
 
+
 def copySE3State2Data(state: ob.State, data: np.ndarray) -> None:
     """
     Copy SE3 state to data (modified in place)
@@ -142,14 +240,36 @@ def copySE3State2Data(state: ob.State, data: np.ndarray) -> None:
     copyR3State2Data(state, data[0:3])
     copySO3State2Data(state.rotation(), data[3:7])
 
+
+def copySE2State2Data(state: ob.State, data: np.ndarray) -> None:
+    """
+    Copy SE2 state to data (modified in place)
+    """
+    data[0] = state.getX()
+    data[1] = state.getY()
+    data[2] = state.getYaw()
+
+
+def copyData2SE2State(
+    data: np.ndarray,
+    state: ob.State,
+) -> None:
+    """
+    Copy SE2 state to data (modified in place)
+    """
+    state.setX(data[0])
+    state.setY(data[1])
+    state.setYaw(data[2])
+
+
 def copyData2SE3State(data: np.ndarray, state: ob.State) -> None:
     """
     Copy data to SE3 state (modified in place)
     Mujoco is [x, y, z, qw, qx, qy, qz,]
     OMPL SE3 is [x, y, z, qx, qy, qz, qw,]
     """
-    state.setXYZ(data[0].item(), data[1].item(), data[2].item())
-    state.rotation().w = data[3].item()
-    state.rotation().x = data[4].item()
-    state.rotation().y = data[5].item()
-    state.rotation().z = data[6].item()
+    state.setXYZ(data[0], data[1], data[2])
+    state.rotation().w = data[3]
+    state.rotation().x = data[4]
+    state.rotation().y = data[5]
+    state.rotation().z = data[6]
