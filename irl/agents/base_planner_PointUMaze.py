@@ -1,60 +1,27 @@
 from math import pi, sin, cos
 from typing import Union, Tuple
 
-
 import numpy as np
 from mujoco_maze.agent_model import AgentModel
 
-from irl.agents.planner_utils import (
-    allocateControlPlanner,
-    allocateGeometricPlanner,
-    angle_normalize,
-    baseUMazeGoalState,
-    baseUMazeStateValidityChecker,
-    copyData2SE2State,
-    copySE2State2Data,
-    make_RealVectorBounds,
-    path_to_numpy,
-)
 from ompl import util as ou
 from ompl import base as ob
 from ompl import geometric as og
 from ompl import control as oc
 
-
-def visualize_path(data: np.ndarray, goal=[0, 8]):
-    from matplotlib import pyplot as plt
-
-    fig = plt.figure()
-    ax = plt.axes(projection="3d")
-    # path
-    ax.plot(data[:, 0], data[:, 1], "o-")
-
-    ax.plot(
-        data[0, 0], data[0, 1], "go", markersize=10, markeredgecolor="k", label="start"
-    )
-    ax.plot(
-        data[-1, 0],
-        data[-1, 1],
-        "ro",
-        markersize=10,
-        markeredgecolor="k",
-        label="achieved goal",
-    )
-    ax.plot(
-        goal[0], goal[1], "bo", markersize=10, markeredgecolor="k", label="desired goal"
-    )
-
-    # Grid
-    UMaze_x = [-2, 10, 10, -2, -2, 6, 6, -2, -2, -2]
-    UMaze_y = [-2, -2, 10, 10, 6, 6, 2, 2, 2, -2]
-    ax.plot(UMaze_x, UMaze_y, "r")
-
-    plt.xlim(-4, 12)
-    plt.ylim(-4, 12)
-    plt.legend()
-    plt.show()
-
+from irl.agents.base_planner_UMaze import (
+    BasePlannerUMaze,
+    baseUMazeGoalState,
+    baseUMazeStateValidityChecker,
+)
+from irl.agents.planner_utils import (
+    allocateControlPlanner,
+    allocateGeometricPlanner,
+    angle_normalize,
+    copyData2SE2State,
+    copySE2State2Data,
+    make_RealVectorBounds,
+)
 
 def getIRLCostObjective(si, cost_fn) -> ob.OptimizationObjective:
     return IRLCostObjective(si, cost_fn)
@@ -126,7 +93,7 @@ class PointStatePropagator(oc.StatePropagator):
         self.agent_model = agent_model
         self.velocity_limits = velocity_limits
 
-        # A placeholder for qpos and qvel in propagte function that don't waste tme on numpy creation
+        # A placeholder for qpos and qvel in propagte function that don't waste time on numpy creation
         self.qpos_temp = np.empty(3)
         self.qvel_temp = np.empty(3)
 
@@ -185,11 +152,12 @@ class PointStatePropagator(oc.StatePropagator):
         return False
 
 
-class BasePlannerPointUMaze:
+class BasePlannerPointUMaze(BasePlannerUMaze):
     def __init__(self, env, use_control=False, log_level=0):
         """
         other_wrapper(<TimeLimit<MazeEnv<PointUMaze-v0>>>)  --> <MazeEnv<PointUMaze-v0>>
         """
+        super().__init__()
         self.agent_model = env.unwrapped.wrapped_env
         # space information
         self.state_dim = 6
@@ -215,10 +183,6 @@ class BasePlannerPointUMaze:
         self.space: ob.StateSpace = None
         self.cspace: oc.ControlSpace = None
         self.init_simple_setup(use_control, log_level)
-
-    @property
-    def PropagStepSize(self) -> float:
-        return self.agent_model.sim.model.opt.timestep
 
     def makeStateSpace(self, lock: bool = True) -> ob.StateSpace:
         """
@@ -253,93 +217,28 @@ class BasePlannerPointUMaze:
             space.lock()
         return space
 
-    def makeControlSpace(self, state_space: ob.StateSpace) -> oc.ControlSpace:
+    def makeGoalState(self):
         """
-        Create a control space and set the bounds for the control space
+        Create a goal state
         """
-        cspace = oc.RealVectorControlSpace(state_space, self.control_dim)
-        c_bounds = make_RealVectorBounds(
-            bounds_dim=self.control_dim,
-            low=self.control_low,
-            high=self.control_high,
-        )
-        cspace.setBounds(c_bounds)
-        return cspace
+        return PointUMazeGoalState(self.si, self.goal_pos, self.threshold)
 
-    def makeStartState(self, s0: np.ndarray) -> ob.State:
+    def makeStateValidityChecker(self):
         """
-        Create a start state.
+        Create a state validity checker.
         """
-        if isinstance(s0, np.ndarray):
-            assert s0.ndim == 1
-        start_state = ob.State(self.space)
-        for i in range(len(s0)):
-            # * Copy an element of an array to a standard Python scalar
-            # * to ensure C++ can recognize it.
-            start_state[i] = s0[i].item()
-        return start_state
+        return PointStateValidityChecker(self.si)
 
-    def init_simple_setup(self, use_control: bool = False, log_level: int = 0):
+    def makeStatePropagator(self):
         """
-        Initialize an ompl::control::SimpleSetup instance
-            or ompl::geometric::SimpleSetup instance. if use_control is False.
+        Create a state propagator.
         """
-        assert isinstance(log_level, int) and 0 <= log_level <= 2
-        log = {
-            0: ou.LOG_WARN,
-            1: ou.LOG_INFO,
-            2: ou.LOG_DEBUG,
-        }
-        # Set log to warn/info/debug
-        ou.setLogLevel(log[log_level])
-        print(f"Set OMPL LOG_LEVEL to {log[log_level]}")
-
-        # Define State Space
-        self.space = self.makeStateSpace()
-
-        if use_control:
-            self.cspace = self.makeControlSpace(self.space)
-            # Define a simple setup class
-            self.ss = oc.SimpleSetup(self.cspace)
-            # Retrieve current instance of Space Information
-            self.si = self.ss.getSpaceInformation()
-
-            # Set State Propagator
-            propagator = PointStatePropagator(self.si, self.agent_model, 10)
-            self.ss.setStatePropagator(propagator)
-
-            # Set propagator step size
-            self.si.setPropagationStepSize(self.PropagStepSize)  # 0.02 in Mujoco
-            self.si.setMinMaxControlDuration(minSteps=1, maxSteps=1)
-        else:
-            # Define a simple setup class
-            self.ss = og.SimpleSetup(self.space)
-            # Retrieve current instance of Space Information
-            self.si = self.ss.getSpaceInformation()
-
-        # Set State Validation Checker
-        stateValidityChecker = PointStateValidityChecker(self.si)
-        self.ss.setStateValidityChecker(stateValidityChecker)
-        # Set the goal state
-        goal_state = PointUMazeGoalState(self.si, self.goal_pos, self.threshold)
-        self.ss.setGoal(goal_state)
-
-        # * planner not set in BasePlanner
+        return PointStatePropagator(self.si, self.agent_model, 10)
 
     def update_ss_cost(self, cost_fn):
         # Set up cost function
         costObjective = getIRLCostObjective(self.si, cost_fn)
         self.ss.setOptimizationObjective(costObjective)
-
-    def clearDataAndSetStartState(self, s0: np.ndarray):
-        """
-        Clear previous planning computation data, does not affect settings and start/goal
-        And set a new start state.
-        """
-        self.ss.clear()
-        # Reset the start state
-        start = self.makeStartState(s0)
-        self.ss.setStartState(start)
 
     def control_plan(
         self, start_state: np.ndarray, solveTime: float = 5.0
@@ -347,39 +246,10 @@ class BasePlannerPointUMaze:
         """
         Perform control planning for a specified amount of time.
         """
-        self.clearDataAndSetStartState(start_state)
-
-        solved = self.ss.solve(solveTime)
-        if solved:
-            control_path = self.ss.getSolutionPath()
-            geometricPath = control_path.asGeometric()
-            states = path_to_numpy(
-                geometricPath, state_dim=self.state_dim, dtype=np.float32
-            )
-            controls = np.asarray(
-                [[u[0], u[1]] for u in control_path.getControls()], dtype=np.float32
-            )
-            return states, controls
-        else:
-            raise ValueError("OMPL is not able to solve under current cost function")
-
-    def geometric_plan(
-        self, start_state: np.ndarray, solveTime: float = 5.0
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Perform geometric planning for a specified amount of time.
-        """
-        self.clearDataAndSetStartState(start_state)
-
-        solved = self.ss.solve(solveTime)
-        if solved:
-            geometricPath = self.ss.getSolutionPath()
-            states = path_to_numpy(geometricPath, self.state_dim, dtype=np.float32)
-            controls = None
-            # return the states and controls(which is None in og plannig)
-            return states, controls
-        else:
-            raise ValueError("OMPL is not able to solve under current cost function")
+        states, controls_ompl = super().control_plan(start_state, solveTime)
+        # Need to wrap for different number of control dimension
+        controls = np.asarray([[u[0], u[1]] for u in controls_ompl], dtype=np.float32)
+        return states, controls
 
 
 class ControlPlanner(BasePlannerPointUMaze):
@@ -470,6 +340,8 @@ def test_100(use_control_plan, plannerType, visualize=False):
     import gym
     import mujoco_maze
     from tqdm import tqdm
+    from planner_utils import visualize_path
+    
 
     print(f"\nStart testing with {plannerType}...")
     env = gym.make("PointUMaze-v0")
@@ -506,7 +378,7 @@ def test_100(use_control_plan, plannerType, visualize=False):
 
             state, controls = planner.plan(start_state=obs[:-1], solveTime=5)
             if visualize:
-                visualize_path(state)
+                visualize_path(state, goal=[0,8], scale=4)
             # Ensure we have the same start position
             env.unwrapped.wrapped_env.set_state(obs[:3], obs[3:-1])
             for i, u in enumerate(controls):
@@ -535,12 +407,12 @@ def test_100(use_control_plan, plannerType, visualize=False):
                 break
         state, _ = planner.plan(start_state=obs[:-1], solveTime=5)
         if visualize:
-            visualize_path(state)
+            visualize_path(state, goal=[0,8], scale=4)
 
 
 if __name__ == "__main__":
     # Test passed
-    # test_100(use_control_plan=True, plannerType="rrt")
+    test_100(use_control_plan=True, plannerType="rrt")
     # test_100(use_control_plan=True, plannerType="sst")
     # test_100(use_control_plan=False, plannerType="rrtstar", visualize=True)
-    test_100(use_control_plan=False, plannerType="prmstar", visualize=True)
+    # test_100(use_control_plan=False, plannerType="prmstar", visualize=True)

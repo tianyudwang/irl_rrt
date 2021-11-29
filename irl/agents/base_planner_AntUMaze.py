@@ -5,13 +5,16 @@ from typing import Tuple, Union
 import numpy as np
 from mujoco_maze.agent_model import AgentModel
 
+
+from irl.agents.base_planner_UMaze import (
+    BasePlannerUMaze,
+    baseUMazeGoalState,
+    baseUMazeStateValidityChecker,
+)
 from irl.agents.planner_utils import (
     allocateControlPlanner,
     allocateGeometricPlanner,
     make_RealVectorBounds,
-    baseUMazeGoalState,
-    baseUMazeStateValidityChecker,
-    path_to_numpy,
     copySE3State2Data,
     copyData2SE3State,
 )
@@ -20,43 +23,6 @@ from ompl import util as ou
 from ompl import base as ob
 from ompl import geometric as og
 from ompl import control as oc
-
-
-def visualize_path(data: str, goal=[0, 16]):
-    """
-    From https://ompl.kavrakilab.org/pathVisualization.html
-    """
-    from matplotlib import pyplot as plt
-
-    fig = plt.figure()
-    ax = plt.axes(projection="3d")
-    # path
-    ax.plot(data[:, 0], data[:, 1], "o-")
-
-    ax.plot(
-        data[0, 0], data[0, 1], "go", markersize=10, markeredgecolor="k", label="start"
-    )
-    ax.plot(
-        data[-1, 0],
-        data[-1, 1],
-        "ro",
-        markersize=10,
-        markeredgecolor="k",
-        label="achieved goal",
-    )
-    ax.plot(
-        goal[0], goal[1], "bo", markersize=10, markeredgecolor="k", label="desired goal"
-    )
-
-    # Grid
-    UMaze_x = np.array([-2, 10, 10, -2, -2, 6, 6, -2, -2, -2]) / 4 * 8
-    UMaze_y = np.array([-2, -2, 10, 10, 6, 6, 2, 2, 2, -2]) / 4 * 8
-    ax.plot(UMaze_x, UMaze_y, "r")
-
-    plt.xlim(-8, 24)
-    plt.ylim(-8, 24)
-    plt.legend()
-    plt.show()
 
 
 class IRLCostObjective(ob.OptimizationObjective):
@@ -125,7 +91,6 @@ class AntStatePropagator(oc.StatePropagator):
         super().__init__(si)
         self.si = si
         self.agent_model = agent_model
-        import ipdb; ipdb.set_trace()
 
         # A placeholder for qpos, qvel and control in propagte function that don't waste time on numpy creation
         self.qpos_temp = np.zeros(15)
@@ -171,11 +136,12 @@ class AntStatePropagator(oc.StatePropagator):
         return False
 
 
-class BasePlannerAntUMaze:
+class BasePlannerAntUMaze(BasePlannerUMaze):
     def __init__(self, env, use_control=False, log_level=0):
         """
         other_wrapper(<TimeLimit<MazeEnv<PointUMaze-v0>>>)  --> <MazeEnv<PointUMaze-v0>>
         """
+        super().__init__()
         self.agent_model = env.unwrapped.wrapped_env
 
         # space information
@@ -193,10 +159,6 @@ class BasePlannerAntUMaze:
         self.unit_quaternion_low = [-1, -1, -1, -1]
 
         # 8 Joints
-
-        # self.joints_high = [0.656203,  1.3356,    0.665058,  0.1000,   0.666901,   0.099308,   0.657522,   1.334417]
-        # self.joints_low =  [-0.663243, -0.09996, -0.661253, -1.32870, -0.658905	, -1.34018, -0.656940, -0.09989]
-
         self.joints_high = np.deg2rad([38, 76.5, 38, 5.73, 38, 5.73, 38, 76.5])
         self.joints_low = np.deg2rad([-38, -5.73, -38, -76.5, -38, -76.5, -38, -5.73])
 
@@ -229,7 +191,7 @@ class BasePlannerAntUMaze:
         self.state_low = np.concatenate([self.qpos_low, self.qvel_low])
 
         # control bound
-        self.control_high = np.ones(8) * 30
+        self.control_high = np.ones(8)  # * 30
         self.control_low = -self.control_high
 
         # goal position and goal radius
@@ -239,10 +201,6 @@ class BasePlannerAntUMaze:
         self.space: ob.StateSpace = None
         self.cspace: oc.ControlSpace = None
         self.init_simple_setup(use_control, log_level)
-
-    @property
-    def PropagStepSize(self) -> float:
-        return self.agent_model.sim.model.opt.timestep
 
     def makeStateSpace(self, lock: bool = True) -> ob.StateSpace:
         """
@@ -291,93 +249,34 @@ class BasePlannerAntUMaze:
         """
         Create a start state.
         """
-        if isinstance(s0, np.ndarray):
-            assert s0.ndim == 1
-        start_state = ob.State(self.space)
-
         # * Quaternion q = w + xi + yj + zk
         # * Mujoco is [w,x,y,z] while OMPL order is [x,y,z,w], so we swap state[3] and state[6]
         state_tmp = s0.copy()
         state_tmp[3], state_tmp[6] = state_tmp[6], state_tmp[3]
+        return super().makeStartState(state_tmp)
 
-        for i in range(len(s0)):
-            # * Copy an element of an array to a standard Python scalar
-            # * to ensure C++ can recognize it.
-            assert (
-                self.state_low[i] <= state_tmp[i] <= self.state_high[i]
-            ), f"Index {i}: {[self.state_low[i], self.state_high[i]]}: {state_tmp[i]}"
-
-            start_state[i] = state_tmp[i].item()
-        return start_state
-
-    def makeControlSpace(self, state_space: ob.StateSpace) -> oc.ControlSpace:
+    def makeGoalState(self):
         """
-        Create a control space and set the bounds for the control space
+        Create a goal state
         """
-        cspace = oc.RealVectorControlSpace(state_space, self.control_dim)
-        c_bounds = make_RealVectorBounds(
-            bounds_dim=self.control_dim,
-            low=self.control_low,
-            high=self.control_high,
-        )
-        cspace.setBounds(c_bounds)
-        return cspace
+        return AntUMazeGoalState(self.si, self.goal_pos, self.threshold)
 
-    def init_simple_setup(self, use_control: bool = False, log_level: int = 0):
+    def makeStateValidityChecker(self):
         """
-        Initialize an ompl::control::SimpleSetup instance
-            or ompl::geometric::SimpleSetup instance. if use_control is False.
+        Create a state validity checker.
         """
-        assert isinstance(log_level, int) and 0 <= log_level <= 2
-        log = {
-            0: ou.LOG_WARN,
-            1: ou.LOG_INFO,
-            2: ou.LOG_DEBUG,
-        }
-        # Set log to warn/info/debug
-        ou.setLogLevel(log[log_level])
-        print(f"Set OMPL LOG_LEVEL to {log[log_level]}")
+        return AntStateValidityChecker(self.si)
 
-        # Define State Space
-        self.space = self.makeStateSpace()
-
-        if use_control:
-            # raise NotImplementedError("Control space is not implemented yet.")
-            self.cspace = self.makeControlSpace(self.space)
-            # Define a simple setup class
-            self.ss = oc.SimpleSetup(self.cspace)
-            # Retrieve current instance of Space Information
-            self.si = self.ss.getSpaceInformation()
-
-            # Set State Propagator
-            propagator = AntStatePropagator(self.si, self.agent_model)
-            self.ss.setStatePropagator(propagator)
-            # Set propagator step size
-            self.si.setPropagationStepSize(self.PropagStepSize)  # 0.02 in Mujoco
-            self.si.setMinMaxControlDuration(minSteps=1, maxSteps=1)
-
-        else:
-            # Define a simple setup class
-            self.ss = og.SimpleSetup(self.space)
-            # Retrieve current instance of Space Information
-            self.si = self.ss.getSpaceInformation()
-
-        # Set State Validation Checker
-        stateValidityChecker = AntStateValidityChecker(self.si)
-        self.ss.setStateValidityChecker(stateValidityChecker)
-        # Set the goal state
-        goal_state = AntUMazeGoalState(self.si, self.goal_pos, self.threshold)
-        self.ss.setGoal(goal_state)
-
-    def clearDataAndSetStartState(self, s0: np.ndarray):
+    def makeStatePropagator(self):
         """
-        Clear previous planning computation data, does not affect settings and start/goal
-        And set a new start state.
+        Create a state propagator.
         """
-        self.ss.clear()
-        # Reset the start state
-        start = self.makeStartState(s0)
-        self.ss.setStartState(start)
+        return AntStatePropagator(self.si, self.agent_model)
+
+    def update_ss_cost(self, cost_fn):
+        # Set up cost function
+        costObjective = getIRLCostObjective(self.si, cost_fn)
+        self.ss.setOptimizationObjective(costObjective)
 
     def control_plan(
         self, start_state: np.ndarray, solveTime: float = 5.0
@@ -385,43 +284,12 @@ class BasePlannerAntUMaze:
         """
         Perform control planning for a specified amount of time.
         """
-        self.clearDataAndSetStartState(start_state)
-
-        solved = self.ss.solve(solveTime)
-        if solved:
-            control_path = self.ss.getSolutionPath()
-            geometricPath = control_path.asGeometric()
-            states = path_to_numpy(
-                geometricPath, state_dim=self.state_dim, dtype=np.float32
-            )
-            controls = np.asarray(
-                [
-                    [u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]]
-                    for u in control_path.getControls()
-                ],
-                dtype=np.float32,
-            )
-            return states, controls
-        else:
-            raise ValueError("OMPL is not able to solve under current cost function")
-
-    def geometric_plan(
-        self, start_state: np.ndarray, solveTime: float = 5.0
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Perform geometric planning for a specified amount of time.
-        """
-        self.clearDataAndSetStartState(start_state)
-
-        solved = self.ss.solve(solveTime)
-        if solved:
-            geometricPath = self.ss.getSolutionPath()
-            states = path_to_numpy(geometricPath, self.state_dim, dtype=np.float32)
-            controls = None
-            # Return the states and controls(which is None in og plannig)
-            return states, controls
-        else:
-            raise ValueError("OMPL is not able to solve under current cost function")
+        states, controls_ompl = super().control_plan(start_state, solveTime)
+        controls = np.asarray(
+            [[u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]] for u in controls_ompl],
+            dtype=np.float32,
+        )
+        return states, controls
 
 
 class ControlPlanner(BasePlannerAntUMaze):
@@ -441,7 +309,7 @@ class ControlPlanner(BasePlannerAntUMaze):
     def plan(
         self, start_state: np.ndarray, solveTime: float = 5.0
     ) -> Tuple[np.ndarray, np.ndarray]:
-        raise NotImplementedError("Control planning is still not working.")
+        # raise NotImplementedError("Control planning is still not working.")
         return super().control_plan(start_state, solveTime)
 
 
@@ -464,6 +332,7 @@ class GeometricPlanner(BasePlannerAntUMaze):
 if __name__ == "__main__":
     import gym
     import mujoco_maze
+    from planner_utils import visualize_path
 
     env = gym.make("AntUMaze-v0")
     # planner = ControlPlanner(env, plannerType="RRT", log_level=2)
@@ -475,4 +344,4 @@ if __name__ == "__main__":
     state, _ = planner.plan(start_state, 5)
     print(state.shape)
 
-    visualize_path(state)
+    visualize_path(state, goal=[0, 16], scale=8)

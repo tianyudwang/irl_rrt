@@ -10,102 +10,6 @@ from ompl import geometric as og
 from ompl import control as oc
 
 
-class baseUMazeGoalState(ob.GoalState):
-    """
-    ompl::base::GoalState (inherits from ompl::base::GoalSampleableRegion) stores one state as the goal.
-    Sampling the goal state will always return this state
-    and the distance to the goal is implemented by calling ompl::base::StateSpace::distance()
-    between the stored goal state and the state passed to ompl::base::GoalRegion::distanceGoal().
-    """
-
-    def __init__(self, si: ob.SpaceInformation, goal: np.ndarray, threshold: float):
-        super().__init__(si)
-
-        self.si = si
-        self.goal = goal[:2].flatten().tolist()
-        self.threshold = threshold
-
-        # Set goal threshold
-        self.setThreshold(self.threshold)
-        assert self.getThreshold() == self.threshold
-
-    def distanceGoal(self, state: ob.State) -> float:
-        """
-        Compute the distance to the goal.
-        """
-        return np.linalg.norm(
-            [state[0].getX() - self.goal[0], state[0].getY() - self.goal[1]]
-        )
-
-    def sampleGoal(self, state: ob.State) -> None:
-        raise NotImplementedError("Need to specified goal state according to Env")
-
-
-class baseUMazeStateValidityChecker(ob.StateValidityChecker):
-    def __init__(
-        self,
-        si,
-        size: float,
-        scaling: float,
-    ):
-        super().__init__(si)
-        self.si = si
-        # radius of agent (consider as a sphere)
-        self.size = size
-
-        unitXMin = unitYMin = -0.5
-        unitXMax = unitYMax = 2.5
-
-        unitMidBlockXMin = -0.5
-        unitMidBlockXMax = 1.5
-        unitMidBlockYMin = 0.5
-        unitMidBlockYMax = 1.5
-
-        self.scaling = scaling  # 8.0
-        self.Umaze_x_min = self.Umaze_y_min = unitXMin * self.scaling + self.size
-        self.Umaze_x_max = self.Umaze_y_max = unitXMax * self.scaling - self.size
-
-        self.midBlock_x_min = unitMidBlockXMin * self.scaling
-        self.midBlock_x_max = unitMidBlockXMax * self.scaling + self.size
-
-        self.midBlock_y_min = unitMidBlockYMin * self.scaling - self.size
-        self.midBlock_y_max = unitMidBlockYMax * self.scaling + self.size
-
-    def isValid(self, state: ob.State) -> bool:
-
-        # Check if the state is in bound first. If not, return False
-        if not self.si.satisfiesBounds(state):
-            return False
-
-        x_pos = state[0].getX()
-        y_pos = state[0].getY()
-
-        # In big square contains U with point size constrained
-        inSquare = all(
-            [
-                self.Umaze_x_min <= x_pos <= self.Umaze_x_max,
-                self.Umaze_y_min <= y_pos <= self.Umaze_y_max,
-            ]
-        )
-        if inSquare:
-            inMidBlock = all(
-                [
-                    self.midBlock_x_min <= x_pos <= self.midBlock_x_max,
-                    self.midBlock_y_min <= y_pos <= self.midBlock_y_max,
-                ]
-            )
-            if inMidBlock:
-                valid = False
-            else:
-                valid = True
-        # Not in big square
-        else:
-            valid = False
-
-        # Inside empty cell
-        return valid
-
-
 def allocateGeometricPlanner(si: ob.SpaceInformation, plannerType: str) -> ob.Planner:
     """Allocate planner in OMPL Geometric"""
     # Keep these in alphabetical order and all lower case
@@ -273,3 +177,38 @@ def copyData2SE3State(data: np.ndarray, state: ob.State) -> None:
     state.rotation().x = data[4]
     state.rotation().y = data[5]
     state.rotation().z = data[6]
+
+
+def visualize_path(data: str, goal, scale):
+    """
+    From https://ompl.kavrakilab.org/pathVisualization.html
+    """
+    from matplotlib import pyplot as plt
+
+    fig = plt.figure()
+    ax = plt.axes(projection="3d")
+    # path
+    ax.plot(data[:, 0], data[:, 1], "o-")
+
+    ax.plot(
+        data[0, 0], data[0, 1], "go", markersize=10, markeredgecolor="k", label="start"
+    )
+    ax.plot(
+        data[-1, 0],
+        data[-1, 1],
+        "ro",
+        markersize=10,
+        markeredgecolor="k",
+        label="achieved goal",
+    )
+    ax.plot(
+        goal[0], goal[1], "bo", markersize=10, markeredgecolor="k", label="desired goal"
+    )
+
+    # Grid
+    UMaze_x = np.array([-0.5, 2.5, 2.5, -0.5, -0.5, 1.5, 1.5, -0.5, -0.5, -0.5]) * scale
+    UMaze_y = np.array([-0.5, -0.5, 2.5, 2.5, 1.5, 1.5, 0.5, 0.5, 0.5, -0.5]) * scale
+    ax.plot(UMaze_x, UMaze_y, "r")
+
+    plt.legend()
+    plt.show()
