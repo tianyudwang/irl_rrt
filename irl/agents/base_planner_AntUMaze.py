@@ -328,7 +328,9 @@ class BasePlannerAntUMaze:
         space.addSubspace(joint_space, 1.0)
         space.addSubspace(velocity_space, 1.0)
 
-        printSubspaceInfo(space)
+        # print space information
+        # printSubspaceInfo(space)
+        
         # Lock this state space. This means no further spaces can be added as components.
         if space.isCompound() and lock:
             space.lock()
