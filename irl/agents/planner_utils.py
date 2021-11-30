@@ -187,7 +187,6 @@ def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save:  bool
     if data.ndim == 1:
         data = data.reshape(1, -1)
     
-    fig = plt.figure()
     # ax = plt.axes(projection="3d")
     ax = plt
     # path
@@ -219,4 +218,4 @@ def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save:  bool
         plt.savefig("./plots/error.png")
     else:
         plt.show()
-        plt.close()
+    plt.close()
