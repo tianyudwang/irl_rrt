@@ -179,28 +179,27 @@ def copyData2SE3State(data: np.ndarray, state: ob.State) -> None:
     state.rotation().z = data[6]
 
 
-def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save:  bool  = False):
+def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save: bool = True):
     """
     From https://ompl.kavrakilab.org/pathVisualization.html
     """
     from matplotlib import pyplot as plt
+
     if data.ndim == 1:
         data = data.reshape(1, -1)
-    
-    # ax = plt.axes(projection="3d")
-    ax = plt
 
     plt.figure(figsize=(10, 10), dpi=300)
+    ax = plt.axes(projection="3d") if not save else plt
 
     # path
     ax.plot(data[:, 0], data[:, 1], "o-")
 
-    circle1 = plt.Circle((data[0, 0], data[0, 1]), 0.5, color='g', lw=5, label="start")
-    plt.gca().add_patch(circle1)
-    
-    # ax.plot(
-        # data[0, 0], data[0, 1], "go", markersize=10, markeredgecolor="k", 
-    # )
+    # start
+    ax.plot(
+        data[0, 0], data[0, 1], "go", markersize=10, markeredgecolor="k", label="start"
+    )
+
+    # achieved goal
     ax.plot(
         data[-1, 0],
         data[-1, 1],
@@ -209,6 +208,7 @@ def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save:  bool
         markeredgecolor="k",
         label="achieved goal",
     )
+    # desired goal
     ax.plot(
         goal[0], goal[1], "bo", markersize=10, markeredgecolor="k", label="desired goal"
     )
@@ -217,9 +217,10 @@ def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save:  bool
     UMaze_x = np.array([-0.5, 2.5, 2.5, -0.5, -0.5, 1.5, 1.5, -0.5, -0.5, -0.5]) * scale
     UMaze_y = np.array([-0.5, -0.5, 2.5, 2.5, 1.5, 1.5, 0.5, 0.5, 0.5, -0.5]) * scale
     ax.plot(UMaze_x, UMaze_y, "r")
-
     plt.legend()
     if save:
+        circle1 = plt.Circle((data[-1, 0], data[-1, 1]), 0.5, color="r", lw=8)
+        plt.gca().add_patch(circle1)
         plt.grid()
         plt.savefig("./plots/error.png")
     else:
