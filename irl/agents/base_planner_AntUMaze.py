@@ -197,6 +197,7 @@ class BasePlannerAntUMaze(BasePlannerUMaze):
         # goal position and goal radius
         self.goal_pos = np.array([0, 16])
         self.threshold = 0.6
+        self.scale = 8
 
         self.space: ob.StateSpace = None
         self.cspace: oc.ControlSpace = None

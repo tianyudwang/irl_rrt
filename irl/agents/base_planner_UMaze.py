@@ -7,7 +7,7 @@ from ompl import base as ob
 from ompl import geometric as og
 from ompl import control as oc
 
-from irl.agents.planner_utils import make_RealVectorBounds, path_to_numpy
+from irl.agents.planner_utils import make_RealVectorBounds, path_to_numpy, visualize_path
 
 
 class baseUMazeGoalState(ob.GoalState):
@@ -138,6 +138,9 @@ class BasePlannerUMaze:
             assert s0.ndim == 1
         start_state = ob.State(self.space)
         for i in range(len(s0)):
+
+            assert self.state_low[i] <= s0[i] <= self.state_high[i], f"Out of Bound at Index {i}: {[self.state_low[i], self.state_high[i]]}: {s0[i]}"
+
             # * Copy an element of an array to a standard Python scalar
             # * to ensure C++ can recognize it.
             start_state[i] = s0[i].item()
@@ -226,6 +229,7 @@ class BasePlannerUMaze:
         Perform control planning for a specified amount of time.
         """
         self.clearDataAndSetStartState(start_state)
+        visualize_path(start_state, self.goal_pos, scale=self.scale, save=True)
 
         solved = self.ss.solve(solveTime)
         if solved:
@@ -236,6 +240,7 @@ class BasePlannerUMaze:
             )
             return states_np, control_path.getControls()
         else:
+            visualize_path(start_state, self.goal_pos, scale=self.scale, save=True)
             raise ValueError("OMPL is not able to solve under current cost function")
 
     def geometric_plan(

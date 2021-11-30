@@ -179,14 +179,17 @@ def copyData2SE3State(data: np.ndarray, state: ob.State) -> None:
     state.rotation().z = data[6]
 
 
-def visualize_path(data: str, goal, scale):
+def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save:  bool  = False):
     """
     From https://ompl.kavrakilab.org/pathVisualization.html
     """
     from matplotlib import pyplot as plt
-
+    if data.ndim == 1:
+        data = data.reshape(1, -1)
+    
     fig = plt.figure()
-    ax = plt.axes(projection="3d")
+    # ax = plt.axes(projection="3d")
+    ax = plt
     # path
     ax.plot(data[:, 0], data[:, 1], "o-")
 
@@ -211,4 +214,9 @@ def visualize_path(data: str, goal, scale):
     ax.plot(UMaze_x, UMaze_y, "r")
 
     plt.legend()
-    plt.show()
+    if save:
+        plt.grid()
+        plt.savefig("./plots/error.png")
+    else:
+        plt.show()
+        plt.close()

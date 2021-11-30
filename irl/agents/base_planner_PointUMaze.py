@@ -164,8 +164,8 @@ class BasePlannerPointUMaze(BasePlannerUMaze):
         self.control_dim = 2
 
         # state bound
-        state_high = np.array([10, 10, pi, 10, 10, 10])
-        state_low = np.array([-2, -2, pi, -10, -10, -10])
+        self.state_high = np.array([10, 10, pi, 10, 10, 10])
+        self.state_low = np.array([-2, -2, -pi, -10, -10, -10])
 
         # control bound
         self.control_high = np.array([1, 0.25])
@@ -174,11 +174,12 @@ class BasePlannerPointUMaze(BasePlannerUMaze):
         # goal position and goal radius
         self.goal_pos = np.array([0, 8])
         self.threshold = 0.6
+        self.scale = 4
 
-        self.qpos_low = state_low[:2]
-        self.qpos_high = state_high[:2]
-        self.qvel_low = state_low[3:]
-        self.qvel_high = state_high[3:]
+        self.qpos_low = self.state_low[:2]
+        self.qpos_high = self.state_high[:2]
+        self.qvel_low = self.state_low[3:]
+        self.qvel_high = self.state_high[3:]
 
         self.space: ob.StateSpace = None
         self.cspace: oc.ControlSpace = None
@@ -412,7 +413,7 @@ def test_100(use_control_plan, plannerType, visualize=False):
 
 # if __name__ == "__main__":
 #     # Test passed
-#     test_100(use_control_plan=True, plannerType="rrt")
+    # test_100(use_control_plan=True, plannerType="rrt")
     # test_100(use_control_plan=True, plannerType="sst")
     # test_100(use_control_plan=False, plannerType="rrtstar", visualize=True)
     # test_100(use_control_plan=False, plannerType="prmstar", visualize=True)
