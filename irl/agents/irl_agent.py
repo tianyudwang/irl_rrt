@@ -68,13 +68,13 @@ class IRL_Agent(BaseAgent):
             if use_control_plan:
                 from irl.agents.base_planner_PointUMaze import ControlPlanner
 
-                self.planner = ControlPlanner(self.env, plannerType, log_level=2)
+                self.planner = ControlPlanner(self.env, plannerType, log_level=0)
                 print(f"Using {plannerType.upper()} contol planner in {env_name}...")
 
             else:
                 from irl.agents.base_planner_PointUMaze import GeometricPlanner
 
-                self.planner = GeometricPlanner(self.env, plannerType, log_level=2)
+                self.planner = GeometricPlanner(self.env, plannerType, log_level=0)
                 print(f"Using {plannerType.upper()} geometric planner in {env_name}...")
                 
 

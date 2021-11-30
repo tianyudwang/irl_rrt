@@ -34,15 +34,11 @@ MAX_VIDEO_LEN = 40  # we overwrite this in the code below
 # we need to patch saved model under python 3.6/3.7 to load them
 NEWER_PYTHON_VERSION = sys.version_info.major == 3 and sys.version_info.minor >= 8
 
-CUSTOM_OBJECTS = (
-    {
+CUSTOM_OBJECTS = {
         "learning_rate": 0.0,
         "lr_schedule": lambda _: 0.0,
         "clip_range": lambda _: 0.0,
-    }
-    if NEWER_PYTHON_VERSION
-    else {}
-)
+}
 
 
 class Trainer:
@@ -367,7 +363,6 @@ def main():
             "TQC_Pendulum-v0",
             "TQC_PointUMaze-v0",
         ],
-        default="SAC_NavEnv-v0",
     )
     parser.add_argument(
         "--planner_type",

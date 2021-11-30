@@ -54,7 +54,7 @@ class IRLCostObjective(ob.OptimizationObjective):
         # TODO:
         # ? Should this be 6D?
         # ? Do we need to ensure s1 and s2 has dtype float32?
-        c = self.cost_fn(s1, s2)
+        c = self.cost_fn(self.s1_data, self.s2_data)
         return ob.Cost(c)
 
 
@@ -410,9 +410,9 @@ def test_100(use_control_plan, plannerType, visualize=False):
             visualize_path(state, goal=[0,8], scale=4)
 
 
-if __name__ == "__main__":
-    # Test passed
-    test_100(use_control_plan=True, plannerType="rrt")
+# if __name__ == "__main__":
+#     # Test passed
+#     test_100(use_control_plan=True, plannerType="rrt")
     # test_100(use_control_plan=True, plannerType="sst")
     # test_100(use_control_plan=False, plannerType="rrtstar", visualize=True)
     # test_100(use_control_plan=False, plannerType="prmstar", visualize=True)
