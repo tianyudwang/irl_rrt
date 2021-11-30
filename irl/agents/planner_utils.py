@@ -189,8 +189,12 @@ def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save:  bool
     
     # ax = plt.axes(projection="3d")
     ax = plt
+
+    plt.figure(figsize=(10, 10), dpi=300)
+    circle1 = plt.Circle((data[:, 0], data[:, 1]), 0.5, color='r', lw=5)
+    plt.gca().add_patch(circle1)
     # path
-    ax.plot(data[:, 0], data[:, 1], "o-")
+    # ax.plot(data[:, 0], data[:, 1], "o-")
 
     ax.plot(
         data[0, 0], data[0, 1], "go", markersize=10, markeredgecolor="k", label="start"
