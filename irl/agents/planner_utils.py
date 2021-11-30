@@ -191,14 +191,16 @@ def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save:  bool
     ax = plt
 
     plt.figure(figsize=(10, 10), dpi=300)
-    circle1 = plt.Circle((data[:, 0], data[:, 1]), 0.5, color='r', lw=5)
-    plt.gca().add_patch(circle1)
-    # path
-    # ax.plot(data[:, 0], data[:, 1], "o-")
 
-    ax.plot(
-        data[0, 0], data[0, 1], "go", markersize=10, markeredgecolor="k", label="start"
-    )
+    # path
+    ax.plot(data[:, 0], data[:, 1], "o-")
+
+    circle1 = plt.Circle((data[0, 0], data[0, 1]), 0.5, color='g', lw=5, label="start")
+    plt.gca().add_patch(circle1)
+    
+    # ax.plot(
+        # data[0, 0], data[0, 1], "go", markersize=10, markeredgecolor="k", 
+    # )
     ax.plot(
         data[-1, 0],
         data[-1, 1],
