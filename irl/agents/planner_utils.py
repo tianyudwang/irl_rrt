@@ -179,7 +179,7 @@ def copyData2SE3State(data: np.ndarray, state: ob.State) -> None:
     state.rotation().z = data[6]
 
 
-def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save: bool = True):
+def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save: bool = False, verbose=False):
     """
     From https://ompl.kavrakilab.org/pathVisualization.html
     """
@@ -223,6 +223,8 @@ def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save: bool 
         plt.gca().add_patch(circle1)
         plt.grid()
         plt.savefig("./plots/error.png")
+        if verbose:
+            print("Saved!!")
     else:
         plt.show()
     plt.close()

@@ -257,4 +257,5 @@ class BasePlannerUMaze:
             # return the states and controls(which is None in og plannig)
             return states, controls
         else:
+            visualize_path(start_state, self.goal_pos, scale=self.scale, save=True, verbose=True)
             raise ValueError("OMPL is not able to solve under current cost function")
