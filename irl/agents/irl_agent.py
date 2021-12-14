@@ -1,17 +1,18 @@
+from typing import Optional, List
 
 import numpy as np
 import gym
 from stable_baselines3 import SAC
 
 from irl.agents.base_agent import BaseAgent 
-from irl.scripts.replay_buffer import ReplayBuffer
-from irl.agents.mlp_reward import MLPReward
-from irl.agents.rrt_planner import RRTPlanner
-from irl.agents.prm_planner import PRMPlanner
-import irl.scripts.pytorch_util as ptu 
-import irl.scripts.utils as utils
-from irl.agents.irl_env_wrapper import IRLEnv
-from irl.agents.base_planner_pendulum import SSTPlanner
+from irl.rewards.reward_net import RewardNet
+from irl.planners.sst_planner import SSTPlanner
+
+import irl.util.pytorch_util as ptu 
+import irl.util.utils as utils
+from irl.util.wrappers import IRLEnv
+from irl.util.replay_buffer import ReplayBuffer
+
 
 class IRL_Agent(BaseAgent):
     def __init__(self, env, agent_params):
@@ -22,14 +23,7 @@ class IRL_Agent(BaseAgent):
         self.agent_params = agent_params
 
         # reward function
-        self.reward = MLPReward(
-            self.agent_params['ob_dim'],
-            self.agent_params['ac_dim'],
-            self.agent_params['n_layers'],
-            self.agent_params['size'],
-            self.agent_params['output_size'],
-            self.agent_params['learning_rate']
-        )
+        self.reward = RewardNet(self.agent_params)
         
         # create a wrapper env with learned reward
         self.irl_env = IRLEnv(self.env, self.reward)
@@ -39,27 +33,23 @@ class IRL_Agent(BaseAgent):
 
         self.state_dim = self.agent_params['ob_dim']
 
-#        self.planner = PRMPlanner(self.state_dim, self.bounds, self.goal)
         self.planner = SSTPlanner()
 
         # Replay buffer to hold demo transitions (maximum transitions)
         self.demo_buffer = ReplayBuffer(10000)
-        self.sample_buffer = ReplayBuffer(10000)
 
     def train_reward(self):
         """
         Train the reward function
         """
         print('\nTraining agent reward function...')
-        demo_transitions = self.sample_transitions(
-            self.agent_params['transitions_per_reward_update'], 
-            demo=True)
-
-        agent_transitions = self.sample_transitions(
-            self.agent_params['transitions_per_reward_update'])
+        demo_transitions = self.sample_transitions(self.agent_params['transitions_per_reward_update'])
 
         # Update OMPL SimpleSetup object cost function with current learned reward
         self.planner.update_ss_cost(self.reward.cost_fn)
+
+        # Synchronize reward net weights on cpu and cuda 
+        self.reward.copy_model_to_cpu()
 
         demo_paths = []
         agent_paths = []
@@ -68,6 +58,7 @@ class IRL_Agent(BaseAgent):
         for i in range(self.agent_params['transitions_per_reward_update']):
             # Sample expert transitions (s, a, s')
             # and find optimal path from s' to goal
+            print('Planning trajectory from expert state ...')
             ob, ac, log_probs, rewards, next_ob, done = [var[i] for var in demo_transitions]
             path, controls = self.planner.plan(next_ob)
             path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
@@ -78,6 +69,7 @@ class IRL_Agent(BaseAgent):
             log_probs = []
             for j in range(self.agent_params['agent_actions_per_demo_transition']):
                 # Sample agent transitions (s, a, s') at each expert state s
+                print(f"Planning trajectory {j+1}/{self.agent_params['agent_actions_per_demo_transition']} from agent state")
                 agent_ac, _ = self.actor.predict(ob)
                 log_prob = utils.get_log_prob(self.actor, agent_ac)
                 agent_next_ob = self.env.one_step_transition(ob, agent_ac)
@@ -134,31 +126,22 @@ class IRL_Agent(BaseAgent):
     #####################################################
     #####################################################
     
-    def add_to_buffer(self, paths, demo=False):
+    def add_to_buffer(self, paths: List[np.ndarray]) -> None:
         """
         Add paths to demo buffer
         """
-        if demo:
-            self.demo_buffer.add_rollouts(paths)
-        else:
-            self.sample_buffer.add_rollouts(paths)
+        self.demo_buffer.add_rollouts(paths)
 
-    def sample_rollouts(self, batch_size, demo=False):
+    def sample_rollouts(self, batch_size: int) -> List[np.ndarray]:
         """
         Sample paths from demo buffer
         """
-        if demo:
-            return self.demo_buffer.sample_recent_rollouts(batch_size)
-        else:
-            return self.sample_buffer.sample_recent_rollouts(batch_size)
+        return self.demo_buffer.sample_recent_rollouts(batch_size)
 
-    def sample_transitions(self, batch_size, demo=False):
+    def sample_transitions(self, batch_size: int) -> List[np.ndarray]:
         """
         Sample transitions from demo buffer
         returns observations, actions, rewards, next_observations, terminals
         """
-        if demo:
-            return self.demo_buffer.sample_random_data(batch_size)
-        else:
-            return self.sample_buffer.sample_recent_data(batch_size)
+        return self.demo_buffer.sample_random_data(batch_size)
 

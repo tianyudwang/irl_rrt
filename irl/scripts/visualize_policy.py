@@ -51,9 +51,9 @@ def visualize_policy(env, model, num_episodes=10):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str, default='NavEnv-v0')
+    parser.add_argument('--env_name', type=str, default='Pendulum-v0')
     parser.add_argument('--algo', type=str, default='SAC')
-    parser.add_argument('--policy_name', type=str, default='../models/SAC_NavEnv-v0_itr_19.zip')
+    parser.add_argument('--policy_name', type=str, default='')
     args = parser.parse_args()
 
     env = build_env(args.env_name)

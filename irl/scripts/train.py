@@ -8,9 +8,11 @@ import numpy as np
 import torch 
 
 from irl.agents.irl_agent import IRL_Agent
-import irl.scripts.pytorch_util as ptu 
-import irl.scripts.utils as utils
-from irl.scripts.logger import Logger
+import irl.util.pytorch_util as ptu 
+import irl.util.utils as utils
+from irl.util.logger import Logger
+from irl.util.wrappers import PendulumWrapper
+
 
 # how many rollouts to save as videos to tensorboard
 MAX_NVIDEO = 2
@@ -70,11 +72,7 @@ class Trainer():
         self.fps = 10
 
     def init_env(self):
-        if self.params['env_name'] == 'NavEnv-v0':
-            import gym_nav
-            self.env = gym.make(self.params['env_name'])
         if self.params['env_name'] == 'Pendulum-v0':
-            from pendulum_env_wrapper import PendulumWrapper
             env = gym.make(self.params['env_name'])
             self.env = PendulumWrapper(env)
         else:
@@ -82,7 +80,6 @@ class Trainer():
 
 
     def init_agent(self):
-
         # Are the observations images?
         img = len(self.env.observation_space.shape) > 2
         # Observation and action sizes
@@ -100,7 +97,7 @@ class Trainer():
         # Collect expert demonstrations
         demo_paths = self.collect_demo_trajectories(
             self.params['expert_policy'], self.params['demo_size'])
-        self.agent.add_to_buffer(demo_paths, demo=True)
+        self.agent.add_to_buffer(demo_paths)
 
         for itr in range(self.params['n_iter']):
             print("\n********** Iteration {} ************".format(itr))
@@ -118,10 +115,9 @@ class Trainer():
             else:
                 self.logmetrics = False
 
-            # Collect agent demonstrations
+            # Collect agent trajectories
             agent_paths, train_video_paths = self.collect_agent_trajectories(
                 self.agent.actor, self.params['demo_size'])
-            self.agent.add_to_buffer(agent_paths)
 
             reward_logs = self.agent.train_reward()
 
@@ -262,17 +258,13 @@ def main():
         help='Number of policy updates per iteration'
     )
     parser.add_argument(
-        '--transitions_per_reward_update', type=int, default=100,
+        '--transitions_per_reward_update', type=int, default=10,
         help='Number of agent transitions per reward update'
     )
     parser.add_argument(
         '--agent_actions_per_demo_transition', type=int, default=1,
         help='Number of agent actions sampled for each expert_transition'
     )
-#    parser.add_argument(
-#        '--rrt_runs', type=int, default=1,
-#        help='Number of RRT* runs to estimate cost to go'
-#    )
     parser.add_argument(
         '--eval_batch_size', type=int, default=10,
         help='Number of policy rollouts for evaluation'

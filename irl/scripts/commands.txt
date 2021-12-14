@@ -1,1 +1,0 @@
-python3 train.py --env_name Pendulum-v0 --exp_name Pendulum-v0 --expert_policy SAC_Pendulum-v0

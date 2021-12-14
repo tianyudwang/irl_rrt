@@ -1,6 +1,6 @@
 import numpy as np
 import time
-import irl.scripts.pytorch_util as ptu
+import irl.util.pytorch_util as ptu
 
 ############################################
 ############################################

@@ -1,5 +1,5 @@
 import numpy as np
-import irl.scripts.utils as utils
+import irl.util.utils as utils
 
 
 class ReplayBuffer(object):

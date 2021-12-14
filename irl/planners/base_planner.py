@@ -156,12 +156,3 @@ class BasePlanner:
             raise ValueError("OMPL is not able to solve under current cost function")
             return None, None
 
-class SSTPlanner(BasePlanner):
-    def __init__(self):
-        super(SSTPlanner, self).__init__()
-        self.init_planner()
-
-    def init_planner(self):
-        # Set planner
-        planner = oc.SST(self.si)
-        self.ss.setPlanner(planner)
