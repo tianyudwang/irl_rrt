@@ -6,7 +6,7 @@ import numpy as np
 from mujoco_maze.agent_model import AgentModel
 
 
-from irl.agents.base_planner_UMaze import (
+from irl.agents.base_planner.base_planner_UMaze import (
     BasePlannerUMaze,
     baseUMazeGoalState,
     baseUMazeStateValidityChecker,

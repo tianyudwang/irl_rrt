@@ -57,7 +57,7 @@ class IRL_Agent(BaseAgent):
 
         elif env_name == "Pendulum-v0":
             # only implement control plan for pendulum for now
-            from irl.agents.base_planner_pendulum import SSTPlanner
+            from irl.agents.base_planner.base_planner_pendulum import SSTPlanner
             
             print(f"only implemented SST in {env_name}!")
             
@@ -66,13 +66,13 @@ class IRL_Agent(BaseAgent):
         
         elif env_name in ["PointUMaze-v0", "PointUMaze-v1"]:
             if use_control_plan:
-                from irl.agents.base_planner_PointUMaze import ControlPlanner
+                from irl.agents.base_planner.base_planner_PointUMaze import ControlPlanner
 
                 self.planner = ControlPlanner(self.env, plannerType, log_level=2)
                 print(f"Using {plannerType.upper()} contol planner in {env_name}...")
 
             else:
-                from irl.agents.base_planner_PointUMaze import GeometricPlanner
+                from irl.agents.base_planner.base_planner_PointUMaze import GeometricPlanner
 
                 self.planner = GeometricPlanner(self.env, plannerType, log_level=2)
                 print(f"Using {plannerType.upper()} geometric planner in {env_name}...")

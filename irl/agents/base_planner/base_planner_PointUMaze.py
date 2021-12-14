@@ -9,7 +9,7 @@ from ompl import base as ob
 from ompl import geometric as og
 from ompl import control as oc
 
-from irl.agents.base_planner_UMaze import (
+from irl.agents.base_planner.base_planner_UMaze import (
     BasePlannerUMaze,
     baseUMazeGoalState,
     baseUMazeStateValidityChecker,
