@@ -109,7 +109,7 @@ class Trainer:
 
             self.env = gym.make(self.params["env_name"])
         elif self.params["env_name"] == "Pendulum-v0":
-            from pendulum_env_wrapper import PendulumWrapper
+            from irl.scripts.wrapper.pendulum_env_wrapper import PendulumWrapper
 
             env = gym.make(self.params["env_name"])
             # *Note we only modify the Pendulum-v0 to swap the x and y axis.
@@ -119,8 +119,8 @@ class Trainer:
             # v0 adn v1 has different reward function.
             # since we are not using the true rewad, they are the same.
             import mujoco_maze
-            from remove_timeDim_wrapper import RemovTimeFeatureWrapper
-            from one_step_PointUMaze_wrapper import PointUMazeOneStepTransitionWrapper
+            from irl.scripts.wrapper.remove_timeDim_wrapper import RemovTimeFeatureWrapper
+            from irl.scripts.wrapper.one_step_PointUMaze_wrapper import PointUMazeOneStepTransitionWrapper
             # * This env includes the time at the last axis, which should be removed.
             # wrap the one step transition AFTER time dim is REMOVED.
             self.env = PointUMazeOneStepTransitionWrapper(RemovTimeFeatureWrapper(gym.make(self.params["env_name"])))

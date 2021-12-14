@@ -34,13 +34,13 @@ def build_env(env_name: str):
         env = gym.make(env_name)
     elif env_name == "Pendulum-v0":
         env = gym.make(env_name)
-        from pendulum_env_wrapper import PendulumWrapper
+        from irl.scripts.wrapper.pendulum_env_wrapper import PendulumWrapper
 
         env = PendulumWrapper(env)
     elif env_name in ["PointUMaze-v0", "PointUMaze-v1"]:
         # v0 adn v1 has different reward function, all others are the same
         import mujoco_maze
-        from remove_timeDim_wrapper import RemovTimeFeatureWrapper
+        from irl.scripts.wrapper.remove_timeDim_wrapper import RemovTimeFeatureWrapper
 
         # * This env includes the time at the last axis, which should be removed.
         env = RemovTimeFeatureWrapper(gym.make(env_name))

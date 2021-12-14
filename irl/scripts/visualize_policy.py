@@ -25,11 +25,11 @@ def build_env(env_name):
         env = gym.make(env_name)
     elif env_name == 'Pendulum-v0':
         env = gym.make(env_name)
-        from pendulum_env_wrapper import PendulumWrapper
+        from irl.scripts.wrapper.pendulum_env_wrapper import PendulumWrapper
         env = PendulumWrapper(env)
     elif env_name == 'PointUMaze-v0':
         import mujoco_maze
-        from remove_timeDim_wrapper import RemovTimeFeatureWrapper
+        from irl.scripts.wrapper.remove_timeDim_wrapper import RemovTimeFeatureWrapper
         
         env = RemovTimeFeatureWrapper(gym.make(env_name))
         

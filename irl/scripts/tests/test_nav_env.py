@@ -1,76 +1,99 @@
-import unittest
 import gym
+import gym_nav
 from stable_baselines3 import SAC
+import numpy as np
+import torch
 
 
-class Path:
-    def __init__(self):
-        self.states = []
-        self.actions = []
-        self.rewards = []
-        self.dones = []
+class NavIRLEnv(gym.Wrapper):
+    def __init__(self, env, reward):
+        gym.Wrapper.__init__(self, env)
+        self.env = env
+        self.reward = reward
 
-    def add_step(self, state, action, reward, done):
-        self.states.append(state)
-        self.actions.append(action)
-        self.rewards.append(reward)
-        self.dones.append(done)
+    def step(self, action):
+        """
+        Override the true environment reward with learned reward
+        """
+        obs, reward, done, info = self.env.step(action)
+        # reward = self.reward(self.last_obs, obs).item()
+        self.last_obs = obs
+        return obs, reward, done, info
 
-
-def build_env(env_name):
-    """
-    Make env and add env wrappers
-    """
-    if env_name == "NavEnv-v0":
-        import gym_nav
-
-        env = gym.make(env_name)
-    else:
-        raise ValueError("Environment {} not supported yet ...".format(env_name))
-    return env
+    def reset(self):
+        self.last_obs = self.env.reset()
+        return self.last_obs
 
 
-def load_policy(model_name):
-    model = SAC.load(model_name)
-    return model
+def train_policy():
+    env = gym.make("NavEnv-v0")
+
+    #    obs = env.render()
+    #    env.render()
+    #    import pdb; pdb.set_trace()
+
+    # model = SAC("MlpPolicy", env, verbose=1)
+    model = SAC.load("SAC_NavEnv-v0")
+    # model.learn(total_timesteps=100000, log_interval=10)
+    # Save model
+    # model.save("SAC_NavEnv-v0")
+    # visualize
+    obs = env.reset()
+    while True:
+        action, _states = model.predict(obs, deterministic=True)
+        obs, reward, done, info = env.step(action)
+        print(obs, reward)
+        env.render()
+        if done:
+            obs = env.reset()
+        # import pdb; pdb.set_trace()
 
 
-def collect_paths(env, model, num_episodes=10, render=False):
+def reward_fn(state, next_state):
+    return 0
+
+
+def test_env():
+    env = gym.make("NavEnv-v0")
+    model = SAC("MlpPolicy", env, verbose=1)
+    model.learn(total_timesteps=1000, log_interval=4)
 
     obs = env.reset()
-    paths, path = [], Path()
-    episode = 0
-    while episode < num_episodes:
-        action, _states = model.predict(obs, deterministic=True)
-        next_obs, reward, done, info = env.step(action)
-        path.add_step(obs, action, reward, done)
-        obs = next_obs
+    for i in range(10):
+        action = env.action_space.sample()
+        obs, reward, done, info = env.step(action)
+        print(obs, reward, done, info)
 
-        if render:
-            env.render()
+    irl_env = NavIRLEnv(env, reward_fn)
+    model = SAC("MlpPolicy", irl_env, verbose=1)
+    model.learn(total_timesteps=1000, log_interval=4)
 
-        if done:
-            episode += 1
-            obs = env.reset()
-            paths.append(path)
-
-    return paths
+    obs = irl_env.reset()
+    for i in range(10):
+        action = irl_env.action_space.sample()
+        obs, reward, done, info = irl_env.step(action)
+        print(obs, reward, done, info)
 
 
-class TestNavEnv(unittest.TestCase):
-    def test(self):
-        env = build_env("NavEnv-v0")
+def test_action():
+    env = gym.make("NavEnv-v0")
+    model = SAC("MlpPolicy", env, verbose=1)
+    obs = env.reset()
+    import pdb
 
-        model_name = "../SAC_NavEnv-v0"
-        model = load_policy(model_name)
+    pdb.set_trace()
 
-        paths = collect_paths(env, model)
+    action, _states = model.predict(obs)
+    action = action[None]
+    ac_tensor = torch.tensor(action, dtype=torch.float32, device="cuda")
+    log_prob = model.actor.action_dist.log_prob(ac_tensor)
 
-        for path in paths:
-            self.assertEqual(len(path.states), len(path.actions))
-            self.assertEqual(len(path.actions), len(path.rewards))
-            self.assertEqual(len(path.rewards), len(path.dones))
+
+def main():
+    # train_policy()
+    test_action()
+    # test_env()
 
 
 if __name__ == "__main__":
-    unittest.main()
+    main()
