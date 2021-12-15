@@ -97,8 +97,10 @@ class Trainer:
         # simulation timestep, will be used for video saving
         self.fps = 10
         self.save_dir = os.path.join(
-            os.path.dirname(os.path.realpath(__file__)), "../../models"
+            os.path.dirname(os.path.realpath(__file__)), f"../../models/{self.params['planner_type']}"
         )
+        if not (os.path.exists(self.save_dir)):
+            os.makedirs(self.save_dir)
 
     def init_env(self):
         """

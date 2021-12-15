@@ -1,3 +1,4 @@
+import os
 from collections import OrderedDict
 from math import pi
 from typing import Union, Optional
@@ -222,7 +223,12 @@ def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save: bool 
         circle1 = plt.Circle((data[-1, 0], data[-1, 1]), 0.5, color="r", lw=8)
         plt.gca().add_patch(circle1)
         plt.grid()
-        plt.savefig("./plots/error.png")
+        plt_dir = "./plots"
+        
+        if not (os.path.exists(plt_dir)):
+            os.makedirs(plt_dir)
+        
+        plt.savefig(f"{plt_dir}/error.png")
         if verbose:
             print("Saved!!")
     else:

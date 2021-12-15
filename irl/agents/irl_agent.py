@@ -6,9 +6,6 @@ from irl.agents.base_agent import BaseAgent
 from irl.agents.mlp_reward import MLPReward
 from irl.scripts.replay_buffer import ReplayBuffer
 
-# from irl.agents.rrt_planner import RRTPlanner
-# from irl.agents.prm_planner import PRMPlanner
-
 import irl.scripts.pytorch_util as ptu
 import irl.scripts.utils as utils
 from irl.agents.irl_env_wrapper import IRLEnv
@@ -46,7 +43,6 @@ class IRL_Agent(BaseAgent):
         self.actor = SAC("MlpPolicy", self.irl_env, verbose=1, device=ptu.device)
 
         self.state_dim = self.agent_params["ob_dim"]
-        # self.planner = PRMPlanner(self.state_dim, self.bounds, self.goal)
 
         # choose control planning or geomtric planning
         use_control_plan = plannerType.lower() in ["sst", "rrt"]    
@@ -113,8 +109,7 @@ class IRL_Agent(BaseAgent):
             path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
             demo_paths.append([path])
 
-            
-            # and find optimal path from s'_a to goal
+            # and find optimal path from s' to goal
             paths = []
             log_probs = []
             for j in range(self.agent_params["agent_actions_per_demo_transition"]):
@@ -123,8 +118,24 @@ class IRL_Agent(BaseAgent):
                 log_prob = utils.get_log_prob(self.actor, agent_ac)
                 agent_next_ob = self.env.one_step_transition(ob, agent_ac)
                 
-                # Find optimal path from s' to goal
-                path, controls = self.planner.plan(agent_next_ob)
+                #! "agent_next_ob" is likely not valid  
+
+                try:
+                    # Find optimal path from s' to goal
+                    path, controls = self.planner.plan(agent_next_ob)
+                except ValueError:
+                    import sys
+                    import pickle
+                    data = {
+                        "agent_ac": agent_ac,
+                        "ob": ob,
+                        "agent_next_ob": agent_next_ob 
+                    }
+                    with open('./data.pkl', 'wb') as f:
+                        pickle.dump(data, f)
+                    sys.exit(1)
+
+
 
                 path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
                 paths.append(path)
@@ -174,15 +185,13 @@ class IRL_Agent(BaseAgent):
         """
         print("\nTraining agent policy...")
         self.actor.learn(total_timesteps=1000, log_interval=5)
-        # TODO: (Yifan)
-        # ? why policy loss is 0? Does it refer to we are using planning?
         train_log = {"Policy loss": 0}
         return train_log
 
     #####################################################
     #####################################################
 
-    def add_to_buffer(self, paths, demo=False):
+    def add_to_buffer(self, paths, demo: bool = False):
         """
         Add paths to demo buffer
         """
@@ -191,7 +200,7 @@ class IRL_Agent(BaseAgent):
         else:
             self.sample_buffer.add_rollouts(paths)
 
-    def sample_rollouts(self, batch_size, demo=False):
+    def sample_rollouts(self, batch_size: int, demo: bool = False):
         """
         Sample paths from demo buffer
         """
@@ -200,7 +209,7 @@ class IRL_Agent(BaseAgent):
         else:
             return self.sample_buffer.sample_recent_rollouts(batch_size)
 
-    def sample_transitions(self, batch_size, demo=False):
+    def sample_transitions(self, batch_size: int, demo: bool = False):
         """
         Sample transitions from demo buffer
         returns observations, actions, rewards, next_observations, terminals
