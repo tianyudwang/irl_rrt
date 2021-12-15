@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Mapping, Union
 
 import numpy as np
 import gym
@@ -15,7 +15,7 @@ from irl.util.replay_buffer import ReplayBuffer
 
 
 class IRL_Agent(BaseAgent):
-    def __init__(self, env, agent_params):
+    def __init__(self, env: gym.Env, agent_params: Mapping[str, Union[float, int]]) -> None:
         super(IRL_Agent, self).__init__()
 
         # init vars
@@ -38,7 +38,7 @@ class IRL_Agent(BaseAgent):
         # Replay buffer to hold demo transitions (maximum transitions)
         self.demo_buffer = ReplayBuffer(10000)
 
-    def train_reward(self):
+    def train_reward(self) -> Mapping[str, float]:
         """
         Train the reward function
         """
@@ -58,7 +58,7 @@ class IRL_Agent(BaseAgent):
         for i in range(self.agent_params['transitions_per_reward_update']):
             # Sample expert transitions (s, a, s')
             # and find optimal path from s' to goal
-            print('Planning trajectory from expert state ...')
+            print(f"Planning trajectory {i+1}/{self.agent_params['transitions_per_reward_update']} from expert state ...")
             ob, ac, log_probs, rewards, next_ob, done = [var[i] for var in demo_transitions]
             path, controls = self.planner.plan(next_ob)
             path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
@@ -83,8 +83,8 @@ class IRL_Agent(BaseAgent):
             agent_paths.append(paths)
             agent_log_probs.append(log_probs)
 
-        demo_paths = self.collate_fn(demo_paths)
-        agent_paths = self.collate_fn(agent_paths)
+        # demo_paths = self.collate_fn(demo_paths)
+        # agent_paths = self.collate_fn(agent_paths)
         agent_log_probs = np.array(agent_log_probs)
 
         reward_logs = []

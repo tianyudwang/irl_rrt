@@ -258,7 +258,7 @@ def main():
         help='Number of policy updates per iteration'
     )
     parser.add_argument(
-        '--transitions_per_reward_update', type=int, default=10,
+        '--transitions_per_reward_update', type=int, default=100,
         help='Number of agent transitions per reward update'
     )
     parser.add_argument(
