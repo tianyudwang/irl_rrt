@@ -28,6 +28,9 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
         
         self.VELOCITY_LIMITS = 10.0
 
+        self.cbound_high = np.array([1, 0.25])
+        self.cbound_low = -self.cbound_high
+
         self.agent_model = env.unwrapped.wrapped_env
         self.nq = self.agent_model.sim.model.nq
         self.nv = self.agent_model.sim.model.nv
@@ -108,7 +111,7 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
     def satisfiedStateBounds(self, state: np.ndarray) -> bool:
 
         assert self.Umaze_x_min <= state[0] <= self.Umaze_x_max, f"X out of bound"
-        assert self.Umaze_y_min <= state[1] <= self.Umaze_y_min, f"Y out of bound"
+        assert self.Umaze_y_min <= state[1] <= self.Umaze_y_max, f"Y out of bound"
         assert -pi <= state[2] <= pi, "Yaw out of bounds "
         assert -10 <= state[3] <= 10, "x-velocity out of bounds"
         assert -10 <= state[4] <= 10, "y-velocity out of bounds"
@@ -116,5 +119,7 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
         return True
     
     def satisfiedControlBounds(self, control: np.ndarray) -> bool:
-
+        
+        assert self.cbound_low[0] <= control[0] <= self.cbound_high[0]
+        assert self.cbound_low[1] <= control[1] <= self.cbound_high[1]
         return True
