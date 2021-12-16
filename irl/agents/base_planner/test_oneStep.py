@@ -23,3 +23,7 @@ if __name__ == "__main__":
     ic(env.isValid(data["ob"]))
     ic(env.satisfiedStateBounds(data["ob"]))
     ic(env.satisfiedControlBounds(data["agent_ac"]))
+
+    next_obs = env.one_step_transition(state=data["ob"], action= data["agent_ac"])
+    ic(next_obs)
+    ic(env.isValid(next_obs))

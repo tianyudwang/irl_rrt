@@ -2,6 +2,7 @@ from math import pi, cos, sin
 
 import gym
 import numpy as np
+from icecream import ic
 
 
 def angle_normalize(x: float) -> float:
@@ -17,7 +18,9 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
     def __init__(self, env):
         super(PointUMazeOneStepTransitionWrapper, self).__init__(env)
 
-        self.env = env
+        self._collision = self.unwrapped._collision
+        ic(self._collision)
+
         # Point radius
         self.size = 0.5
         self.Umaze_x_min = self.Umaze_y_min = -2 + self.size
@@ -88,7 +91,8 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
         
         # Checks that the new_position is in the wall
         collision = self._collision.detect(old_pos, new_pos)
-        
+        ic(collision)
+
         return next_obs
 
     def isValid(self, state: np.ndarray) -> bool:
@@ -108,12 +112,13 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
             inMidBlock = (-2 <= x_pos <= 6.5) and (1.5 <= y_pos <= 6.5)
             if inMidBlock:
                 valid = False
+                ic("MidBlock")
             else:
                 valid = True
         # Not in big square
         else:
             valid = False
-
+            ic("Notin big Square")
         # Inside empty cell  
         return valid
     
