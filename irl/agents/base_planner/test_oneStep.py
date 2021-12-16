@@ -47,8 +47,8 @@ class DummyStartStateValidityChecker:
 
 if __name__ == "__main__":
 
-    env = gym.make("PointUMaze-v0")
-    env = PointUMazeOneStepTransitionWrapper(RemovTimeFeatureWrapper(env))
+    maze_env = gym.make("PointUMaze-v0")
+    env = PointUMazeOneStepTransitionWrapper(RemovTimeFeatureWrapper(maze_env))
 
     with open("./data.pkl", "rb") as f:
         data = pickle.load(f)

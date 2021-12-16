@@ -17,6 +17,7 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
     def __init__(self, env):
         super(PointUMazeOneStepTransitionWrapper, self).__init__(env)
 
+        self.env = env
         # Point radius
         self.size = 0.5
         self.Umaze_x_min = self.Umaze_y_min = -2 + self.size
@@ -46,6 +47,8 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
         Using mujoco internal:
         https://github.com/openai/gym/blob/master/gym/envs/mujoco/mujoco_env.py#L117-L124
         """
+
+        
         qpos_temp = state[: self.nq].copy()
         qvel_temp = state[self.nq : self.nq + self.nv].copy()
 
@@ -76,6 +79,12 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
         assert -10 <= next_obs[3] <= 10, "x-velocity out of bounds after mj sim step"
         assert -10 <= next_obs[4] <= 10, "y-velocity out of bounds after mj sim step"
         assert -10 <= next_obs[5] <= 10, "yaw-velocity out of bounds after mj sim step"
+        
+        old_pos = state[:2].copy()
+        new_pos = next_obs[:2].copy()
+        
+        # Checks that the new_position is in the wall
+        collision = self._collision.detect(old_pos, new_pos)
         
         return next_obs
 
