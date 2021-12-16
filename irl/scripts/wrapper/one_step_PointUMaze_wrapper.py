@@ -1,4 +1,5 @@
 from math import pi, cos, sin
+from copy import deepcopy
 
 import gym
 import numpy as np
@@ -18,8 +19,8 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
     def __init__(self, env):
         super(PointUMazeOneStepTransitionWrapper, self).__init__(env)
 
+        self.dummy_env = env.unwrapped.wrapped_env
         self._collision = self.unwrapped._collision
-        ic(self._collision)
 
         # Point radius
         self.size = 0.5
@@ -137,3 +138,14 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
         assert self.cbound_low[0] <= control[0] <= self.cbound_high[0]
         assert self.cbound_low[1] <= control[1] <= self.cbound_high[1]
         return True
+    
+    def dummy_step(self, state: np.ndarray, action: np.ndarray) -> np.ndarray:
+        
+        old_pos = state[:2].copy()
+        qpos_temp = state[: self.nq].copy()
+        qvel_temp = state[self.nq : self.nq + self.nv].copy()
+        self.dummy_env.set_state(qpos=qpos_temp, qvel=qvel_temp)
+
+        inner_next_obs, inner_reward, _, info = self.dummy_env.step(action)
+
+        return inner_next_obs
