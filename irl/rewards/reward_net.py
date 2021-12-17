@@ -122,7 +122,7 @@ class RewardNet(nn.Module):
     #     )
     #     rewards = self(self.model, states, next_states)
     #     return rewards
-    
+
     def update(
             self,
             demo_paths: List[List[np.ndarray]],
@@ -181,3 +181,6 @@ class RewardNet(nn.Module):
         PATH = '/tmp/irl_reward_net.pt'
         th.save(self.model.state_dict(), PATH)
         self.model_cpu.load_state_dict(th.load(PATH, map_location=self.device_cpu))
+
+    def save_model(self, filename: str) -> None:
+        th.save(self.model.state_dict(), filename)

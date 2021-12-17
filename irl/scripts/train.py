@@ -72,12 +72,13 @@ class Trainer():
         self.fps = 10
 
     def init_env(self):
-        if self.params['env_name'] == 'Pendulum-v0':
-            env = gym.make(self.params['env_name'])
-            self.env = PendulumWrapper(env)
-        else:
-            raise ValueError('Environment {} is not supported'.format(self.params['env_name']))
-
+        """Load environment with fixed random seed"""
+        assert self.params['env_name'] == 'Pendulum-v0', f"Environment {self.params['env_name']} not supported yet."
+        seed = self.params['seed']
+        rng = np.random.RandomState(seed)
+        env_seed = rng.randint(0, (1 << 31) - 1)
+        self.env = gym.make("Pendulum-v0")
+        self.env.seed(int(env_seed))
 
     def init_agent(self):
         # Are the observations images?
@@ -125,6 +126,7 @@ class Trainer():
                 policy_logs = self.agent.train_policy()
 
             # log/save
+            self.save_model(itr)
             if self.log_video or self.logmetrics:
                 self.agent.actor.save("../models/SAC_NavEnv-v0_itr_{}".format(itr))
                 # perform logging
@@ -135,7 +137,11 @@ class Trainer():
                 if self.params['save_params']:
                     self.agent.save('{}/agent_itr_{}.pt'.format(self.params['logdir'], itr))
 
-    def collect_demo_trajectories(self, expert_policy, batch_size):
+    def collect_demo_trajectories(
+            self, 
+            expert_policy: str, 
+            batch_size: int 
+        ) -> List[Path]:
         """
         :param expert_policy:  relative path to saved expert policy
         :return:
@@ -147,6 +153,7 @@ class Trainer():
         demo_paths = utils.sample_trajectories(
             self.env, expert_policy, batch_size)
         #demo_paths = utils.pad_absorbing_states(demo_paths)
+        utils.check_demo_performance(demo_paths)
         return demo_paths
 
     def collect_agent_trajectories(self, collect_policy, batch_size):
@@ -169,6 +176,14 @@ class Trainer():
             train_video_paths = utils.sample_trajectories(
                 self.env, collect_policy, MAX_NVIDEO, render=True)
         return paths, train_video_paths
+
+
+    def save_model(self, itr: int) -> None:
+        # Save model to local        
+        model_dir = os.path.join(self.params['logdir'], 'model')
+        if not(os.path.exists(model_dir)):
+            os.makedirs(model_dir)
+        self.agent.save_reward_model(os.path.join(model_dir, f'itr_{itr:02d}.pt'))      
 
     def perform_logging(self, itr, paths, eval_policy, train_video_paths, 
                         reward_logs, policy_logs):
@@ -250,15 +265,15 @@ def main():
         help='Number of expert paths to add to replay buffer'
     )
     parser.add_argument(
-        '--reward_updates_per_iter', type=int, default=10,
+        '--reward_updates_per_iter', type=int, default=8,
         help='Number of reward updates per iteration'
     )
     parser.add_argument(
-        '--policy_updates_per_iter', type=int, default=10,
+        '--policy_updates_per_iter', type=int, default=8,
         help='Number of policy updates per iteration'
     )
     parser.add_argument(
-        '--transitions_per_reward_update', type=int, default=100,
+        '--transitions_per_reward_update', type=int, default=128,
         help='Number of agent transitions per reward update'
     )
     parser.add_argument(
@@ -311,4 +326,8 @@ def main():
     trainer.training_loop()
 
 if __name__ == '__main__':
+    # Allow CUDA in multiprocessing
+    # https://pytorch.org/docs/stable/notes/multiprocessing.html#cuda-in-multiprocessing
+    torch.multiprocessing.set_start_method('spawn', force=True)
+    
     main()

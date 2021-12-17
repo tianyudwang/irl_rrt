@@ -155,4 +155,3 @@ class BasePlanner:
         else:
             raise ValueError("OMPL is not able to solve under current cost function")
             return None, None
-

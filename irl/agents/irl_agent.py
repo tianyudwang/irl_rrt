@@ -1,4 +1,4 @@
-from typing import Optional, List, Mapping, Union
+from typing import Optional, List, Mapping, Union, Tuple
 
 import numpy as np
 import gym
@@ -7,6 +7,7 @@ from stable_baselines3 import SAC
 from irl.agents.base_agent import BaseAgent 
 from irl.rewards.reward_net import RewardNet
 from irl.planners.sst_planner import SSTPlanner
+from irl.planners.planner import Planner
 
 import irl.util.pytorch_util as ptu 
 import irl.util.utils as utils
@@ -15,7 +16,11 @@ from irl.util.replay_buffer import ReplayBuffer
 
 
 class IRL_Agent(BaseAgent):
-    def __init__(self, env: gym.Env, agent_params: Mapping[str, Union[float, int]]) -> None:
+    def __init__(
+        self, 
+        env: gym.Env, 
+        agent_params: Mapping[str, Union[float, int]]
+    ) -> None:
         super(IRL_Agent, self).__init__()
 
         # init vars
@@ -34,14 +39,13 @@ class IRL_Agent(BaseAgent):
         self.state_dim = self.agent_params['ob_dim']
 
         self.planner = SSTPlanner()
+        # self.planner = Planner()
 
         # Replay buffer to hold demo transitions (maximum transitions)
         self.demo_buffer = ReplayBuffer(10000)
 
     def train_reward(self) -> Mapping[str, float]:
-        """
-        Train the reward function
-        """
+        """Train the reward function"""
         print('\nTraining agent reward function...')
         demo_transitions = self.sample_transitions(self.agent_params['transitions_per_reward_update'])
 
@@ -73,7 +77,6 @@ class IRL_Agent(BaseAgent):
                 agent_ac, _ = self.actor.predict(ob)
                 log_prob = utils.get_log_prob(self.actor, agent_ac)
                 agent_next_ob = self.env.one_step_transition(ob, agent_ac)
-
                 
                 # Find optimal path from s' to goal
                 path, controls = self.planner.plan(agent_next_ob)
@@ -85,12 +88,73 @@ class IRL_Agent(BaseAgent):
 
         # demo_paths = self.collate_fn(demo_paths)
         # agent_paths = self.collate_fn(agent_paths)
-        agent_log_probs = np.array(agent_log_probs)
+        # agent_log_probs = np.array(agent_log_probs)
 
         reward_logs = []
         for step in range(self.agent_params['reward_updates_per_iter']):
             reward_logs.append(self.reward.update(demo_paths, agent_paths, agent_log_probs))
         return reward_logs
+
+
+    def train_reward_mp(self) -> Mapping[str, float]:
+        """Same function as above but uses multiprocessing to plan optimal paths"""
+        print('\nTraining agent reward function...')
+        demo_transitions = self.sample_transitions(self.agent_params['transitions_per_reward_update'])
+        demo_transitions = [[var[i] for var in demo_transitions]
+            for i in range(self.agent_params['transitions_per_reward_update'])]
+        agent_next_states, agent_log_probs = self.sample_agent_transitions(demo_transitions)
+        
+        # Synchronize reward net weights for cost inference on cpu in motion planning
+        self.reward.copy_model_to_cpu()
+        
+        # Update OMPL SimpleSetup object cost function with current learned reward
+        self.planner.update_cost(self.reward.cost_fn)
+
+        demo_paths, agent_paths = self.planner.plan_mp(demo_transitions, agent_next_states)
+
+        reward_logs = []
+        for step in range(self.agent_params['reward_updates_per_iter']):
+            reward_logs.append(self.reward.update(demo_paths, agent_paths, agent_log_probs))
+        return reward_logs
+
+    def sample_agent_transitions(
+            self, 
+            demo_transitions: List[List[np.ndarray]]
+        ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+        """Sample agent policy transitions at each expert state"""
+        agent_next_states = [[] for _ in range(len(demo_transitions))]
+        agent_log_probs = [[] for _ in range(len(demo_transitions))]
+        for i, demo_transition in enumerate(demo_transitions):
+            state = demo_transition[0]
+            for j in range(self.agent_params['agent_actions_per_demo_transition']):
+                agent_ac, _ = self.actor.predict(state)
+                log_prob = utils.get_log_prob(self.actor, agent_ac)
+                agent_next_state = self.env.one_step_transition(state, agent_ac)
+                agent_next_states[i].append(agent_next_state)
+                agent_log_probs[i].append(log_prob)
+        return agent_next_states, agent_log_probs
+
+    def plan_paths_from_demo_state(
+            self, 
+            demo_transition: List[np.ndarray]
+        ) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
+        """Plan optimal paths from expert and agent next_states"""
+        state, _, _, _, next_state, _ = demo_transition
+        path, controls = self.planner.plan(next_state)
+        demo_paths = [np.concatenate((state.reshape(1, self.state_dim), path), axis=0)]
+
+        # agent_paths, agent_log_probs = [], []
+        # for j in range(self.agent_params['agent_actions_per_demo_transition']):
+        #     agent_ac, _ = self.actor.predict(state)
+        #     log_prob = utils.get_log_prob(self.actor, agent_ac)
+        #     agent_next_state = self.env.one_step_transition(state, agent_ac)
+        #     path, controls = self.planner.plan(agent_next_state)
+        #     path = np.concatenate((state.reshape(1, self.state_dim), path), axis=0)
+        #     agent_paths.append(path)
+        #     agent_log_probs.append(log_prob)
+
+        return demo_paths#, agent_paths, agent_log_probs
+
 
     def collate_fn(self, paths):
         """
@@ -145,3 +209,6 @@ class IRL_Agent(BaseAgent):
         """
         return self.demo_buffer.sample_random_data(batch_size)
 
+    ######################################################
+    def save_reward_model(self, filename: str) -> None:
+        self.reward.save_model(filename)
