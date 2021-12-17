@@ -239,7 +239,8 @@ class BasePlannerUMaze:
             return states_np, control_path.getControls()
         else:
             visualize_path(start_state, self.goal_pos, scale=self.scale, save=True)
-            raise ValueError("OMPL is not able to solve under current cost function")
+            # raise ValueError("OMPL is not able to solve under current cost function")
+            return None, None
 
     def geometric_plan(
         self, start_state: np.ndarray, solveTime: float = 5.0
@@ -258,4 +259,5 @@ class BasePlannerUMaze:
             return states, controls
         else:
             visualize_path(start_state, self.goal_pos, scale=self.scale, save=True, verbose=True)
-            raise ValueError("OMPL is not able to solve under current cost function")
+            # raise ValueError("OMPL is not able to solve under current cost function")
+            return None, None

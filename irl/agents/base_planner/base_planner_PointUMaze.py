@@ -75,7 +75,7 @@ class PointStateValidityChecker(baseUMazeStateValidityChecker):
     def __init__(
         self,
         si: Union[oc.SpaceInformation, ob.SpaceInformation],
-        size: float = 0.5,
+        size: float = 0.4,
         scaling: float = 4,
     ):
         super(PointStateValidityChecker, self).__init__(si, size, scaling)
@@ -158,7 +158,10 @@ class BasePlannerPointUMaze(BasePlannerUMaze):
         other_wrapper(<TimeLimit<MazeEnv<PointUMaze-v0>>>)  --> <MazeEnv<PointUMaze-v0>>
         """
         super().__init__()
+        
+        # agent model(Point)
         self.agent_model = env.unwrapped.wrapped_env
+        
         # space information
         self.state_dim = 6
         self.control_dim = 2
@@ -176,6 +179,7 @@ class BasePlannerPointUMaze(BasePlannerUMaze):
         self.threshold = 0.6
         self.scale = 4
 
+        # qpos and qvel
         self.qpos_low = self.state_low[:2]
         self.qpos_high = self.state_high[:2]
         self.qvel_low = self.state_low[3:]
@@ -249,7 +253,10 @@ class BasePlannerPointUMaze(BasePlannerUMaze):
         """
         states, controls_ompl = super().control_plan(start_state, solveTime)
         # Need to wrap for different number of control dimension
-        controls = np.asarray([[u[0], u[1]] for u in controls_ompl], dtype=np.float32)
+        try:
+            controls = np.asarray([[u[0], u[1]] for u in controls_ompl], dtype=np.float32)
+        except:
+            return None, None
         return states, controls
 
 
@@ -306,8 +313,6 @@ class DummyStartStateValidityChecker:
         self.Umaze_x_max = self.Umaze_y_max = 10 - self.size
 
     def isValid(self, state: np.ndarray) -> bool:
-
-        #
 
         x_pos = state[0]
         y_pos = state[1]

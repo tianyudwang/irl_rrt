@@ -220,7 +220,7 @@ def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save: bool 
     ax.plot(UMaze_x, UMaze_y, "r")
     plt.legend()
     if save:
-        circle1 = plt.Circle((data[-1, 0], data[-1, 1]), 0.5, color="r", lw=8)
+        circle1 = plt.Circle((data[-1, 0], data[-1, 1]), 0.4, color="r", lw=8)
         plt.gca().add_patch(circle1)
         plt.grid()
         plt_dir = "./plots"
@@ -228,7 +228,9 @@ def visualize_path(data: np.ndarray, goal: np.ndarray, scale: float, save: bool 
         if not (os.path.exists(plt_dir)):
             os.makedirs(plt_dir)
         
-        plt.savefig(f"{plt_dir}/error.png")
+        import random
+        num = random.randint(0, 100)
+        plt.savefig(f"{plt_dir}/error_{num}.png")
         if verbose:
             print("Saved!!")
     else:

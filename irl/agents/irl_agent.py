@@ -64,13 +64,13 @@ class IRL_Agent(BaseAgent):
             if use_control_plan:
                 from irl.agents.base_planner.base_planner_PointUMaze import ControlPlanner
 
-                self.planner = ControlPlanner(self.env, plannerType, log_level=2)
+                self.planner = ControlPlanner(self.env, plannerType, log_level=0)
                 print(f"Using {plannerType.upper()} contol planner in {env_name}...")
 
             else:
                 from irl.agents.base_planner.base_planner_PointUMaze import GeometricPlanner
 
-                self.planner = GeometricPlanner(self.env, plannerType, log_level=2)
+                self.planner = GeometricPlanner(self.env, plannerType, log_level=0)
                 print(f"Using {plannerType.upper()} geometric planner in {env_name}...")
                 
 
@@ -120,10 +120,9 @@ class IRL_Agent(BaseAgent):
                 
                 #! "agent_next_ob" is likely not valid  
 
-                try:
-                    # Find optimal path from s' to goal
-                    path, controls = self.planner.plan(agent_next_ob)
-                except ValueError:
+                # Find optimal path from s' to goal
+                path, controls = self.planner.plan(agent_next_ob)
+                if path is None:
                     import sys
                     import pickle
                     data = {
@@ -131,11 +130,10 @@ class IRL_Agent(BaseAgent):
                         "ob": ob,
                         "agent_next_ob": agent_next_ob 
                     }
-                    with open('./data.pkl', 'wb') as f:
+                    with open(f'./data_{i}{j}.pkl', 'wb') as f:
                         pickle.dump(data, f)
-                    sys.exit(1)
-
-
+                    print("SAVED!")
+                    sys.exit(0)
 
                 path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
                 paths.append(path)
