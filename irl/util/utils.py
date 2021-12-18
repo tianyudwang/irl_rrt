@@ -1,20 +1,21 @@
-import numpy as np
+from typing import Optional, Union, Any, Tuple, List
 import time
 
-from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
+import gym
+import numpy as np
 
+from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
 import irl.util.pytorch_util as ptu
-from irl.agents.irl_agent import IRLAgent
 
 ############################################
 ############################################
 
 def sample_trajectory(
         env: gym.Env, 
-        policy: Union[OffPolicyAlgorithm, IRLAgent], 
+        policy: Union[OffPolicyAlgorithm, Any], 
         render: Optional[bool] = False, 
         render_mode: Optional[Tuple[str]]=('rgb_array')
-    ) -> Path:
+    ):
     """Sample one trajectory"""
     
     # initialize env for the beginning of a new rollout
@@ -50,7 +51,7 @@ def sample_trajectory(
 
         # record result of taking that action
         steps += 1
-        next_obs.append(state.copy())
+        next_states.append(state.copy())
         rewards.append(rew)
         terminals.append(done)
 
@@ -74,14 +75,14 @@ def get_log_prob(
     log_prob = policy.actor.action_dist.log_prob(ac_tensor)
     log_prob = log_prob.item()
     # Manually correct NaN values and clip range
-    log_prob = log_min if np.isnan(log_prob)
+    if np.isnan(log_prob): log_prob = log_min 
     log_prob = min(log_prob, log_max)
     log_prob = max(log_prob, log_min)
     return log_prob
 
 def sample_trajectories(
         env: gym.Env, 
-        policy: Union[OffPolicyAlgorithm, IRLAgent],  
+        policy: Union[OffPolicyAlgorithm, Any],  
         num_trajectories: int, 
         render: Optional[bool] = False, 
         render_mode: Optional[Tuple[str]] = ('rgb_array')

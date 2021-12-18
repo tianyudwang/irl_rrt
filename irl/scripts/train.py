@@ -1,3 +1,4 @@
+from typing import List
 import argparse
 import os
 import time
@@ -77,7 +78,8 @@ class Trainer():
         seed = self.params['seed']
         rng = np.random.RandomState(seed)
         env_seed = rng.randint(0, (1 << 31) - 1)
-        self.env = gym.make("Pendulum-v0")
+        self.env = PendulumWrapper(gym.make("Pendulum-v0"))
+        print(env_seed)
         self.env.seed(int(env_seed))
 
     def init_agent(self):
@@ -141,7 +143,7 @@ class Trainer():
             self, 
             expert_policy: str, 
             batch_size: int 
-        ) -> List[Path]:
+        ):
         """
         :param expert_policy:  relative path to saved expert policy
         :return:

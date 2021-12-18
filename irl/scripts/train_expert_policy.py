@@ -10,14 +10,14 @@ def build_env(env_name):
     """
     if env_name == 'Pendulum-v0':
         env = gym.make(env_name)
-        from wrappers import PendulumWrapper
+        from irl.util.wrappers import PendulumWrapper
         env = PendulumWrapper(env)
     else:
         raise ValueError('Environment {} not supported yet ...'.format(env_name))
     return env
 
 def train_policy(env, algo, resume_training, policy_name, 
-                 timesteps=100000):
+                 timesteps=50000):
     """
     Train the expert policy in RL
     """
@@ -39,7 +39,7 @@ def train_policy(env, algo, resume_training, policy_name,
     return model
 
 def save_policy(model, policy_name):
-    model.save(policy_name)
+    model.save(os.path.join("../expert_models", policy_name))
 
 def visualize_policy(env, model, num_episodes=10):
     """
