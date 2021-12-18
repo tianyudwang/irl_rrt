@@ -256,9 +256,9 @@ class Trainer():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str, default='NavEnv-v0')
-    parser.add_argument('--exp_name', type=str, default='NavEnv-v0')
-    parser.add_argument('--expert_policy', type=str, default='SAC_NavEnv-v0')        
+    parser.add_argument('--env_name', type=str, default='Pendulum-v0')
+    parser.add_argument('--exp_name', type=str, default='Pendulum-v0')
+    parser.add_argument('--expert_policy', type=str, default='SAC_Pendulum-v0')        
     parser.add_argument(
         '--n_iter', '-n', type=int, default=100,
         help='Number of total iterations')
