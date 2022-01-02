@@ -8,6 +8,8 @@ mujoco-maze/
 # Data
 # *.zip
 data/
+d4rl/
+models/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

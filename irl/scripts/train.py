@@ -193,6 +193,7 @@ class Trainer:
             # Train Reward
             reward_logs = self.agent.train_reward()
             for step in range(self.params["policy_updates_per_iter"]):
+                print(f"({step}) Training agent policy...", end = "\r")
                 policy_logs = self.agent.train_policy()
 
             # log/save
@@ -452,6 +453,8 @@ def main():
         + time.strftime("%d-%m-%Y_%H-%M-%S")
         + "_"
         + f"{uuid.uuid4().hex[:3]}"
+        + "_"
+        + f"{args.planner_type}"
     )
     logdir = os.path.join(data_path, logdir)
     params["logdir"] = logdir

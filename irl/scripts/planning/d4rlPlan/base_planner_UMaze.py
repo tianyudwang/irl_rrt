@@ -34,7 +34,7 @@ class baseUMazeGoalState(ob.GoalState):
         Compute the distance to the goal.
         """
         return np.linalg.norm(
-            [state[0].getX() - self.goal[0], state[0].getY() - self.goal[1]]
+            [state[0][0] - self.goal[0], state[0][1] - self.goal[1]]
         )
 
     def sampleGoal(self, state: ob.State) -> None:
@@ -47,28 +47,27 @@ class baseUMazeStateValidityChecker(ob.StateValidityChecker):
         si,
         size: float,
         scaling: float,
+        offset: float,
     ):
         super().__init__(si)
         self.si = si
         # radius of agent (consider as a sphere)
         self.size = size
+        self.offset = offset
+        self.scaling = scaling
 
-        unitXMin = unitYMin = -0.5
-        unitXMax = unitYMax = 2.5
+        unitXMin = unitYMin = 0.0 + self.offset
+        unitXMax = unitYMax = 3.0 + self.offset
+        unitMidBlockXMin, unitMidBlockXMax = np.array([1.0, 2.0]) + self.offset
+        unitMidBlockYMin, unitMidBlockYMax = np.array([0.0, 2.0]) + self.offset
 
-        unitMidBlockXMin = -0.5
-        unitMidBlockXMax = 1.5
-        unitMidBlockYMin = 0.5
-        unitMidBlockYMax = 1.5
-
-        self.scaling = scaling  # 8.0
         self.Umaze_x_min = self.Umaze_y_min = unitXMin * self.scaling + self.size
         self.Umaze_x_max = self.Umaze_y_max = unitXMax * self.scaling - self.size
 
-        self.midBlock_x_min = unitMidBlockXMin * self.scaling
+        self.midBlock_x_min = unitMidBlockXMin * self.scaling - self.size
         self.midBlock_x_max = unitMidBlockXMax * self.scaling + self.size
 
-        self.midBlock_y_min = unitMidBlockYMin * self.scaling - self.size
+        self.midBlock_y_min = unitMidBlockYMin * self.scaling 
         self.midBlock_y_max = unitMidBlockYMax * self.scaling + self.size
 
     def isValid(self, state: ob.State) -> bool:
@@ -77,8 +76,8 @@ class baseUMazeStateValidityChecker(ob.StateValidityChecker):
         if not self.si.satisfiesBounds(state):
             return False
 
-        x_pos = state[0].getX()
-        y_pos = state[0].getY()
+        x_pos = state[0][0]
+        y_pos = state[0][1]
 
         # In big square contains U with point size constrained
         inSquare = all(
@@ -194,8 +193,10 @@ class BasePlannerUMaze:
             propagator = self.makeStatePropagator()
             self.ss.setStatePropagator(propagator)
 
+            # TODO: The MinMaxContorlDuration is the problem
             # Set propagator step size
-            self.si.setPropagationStepSize(self.PropagStepSize)  # 0.02 in Mujoco
+            # self.si.setPropagationStepSize(self.PropagStepSize)  # 0.01 in d4rl
+            self.si.setPropagationStepSize(0.02)  # 0.02 in Mujoco
             self.si.setMinMaxControlDuration(minSteps=1, maxSteps=1)
         else:
             # Define a simple setup class
@@ -254,9 +255,10 @@ class BasePlannerUMaze:
         if solved:
             geometricPath = self.ss.getSolutionPath()
             states = path_to_numpy(geometricPath, self.state_dim, dtype=np.float32)
-            controls = None
+            
             # return the states and controls(which is None in og plannig)
-            return states, controls
+            # controls = None
+            return states, None
         else:
             visualize_path(start_state, self.goal_pos, scale=self.scale, save=True, verbose=True)
             raise ValueError("OMPL is not able to solve under current cost function")

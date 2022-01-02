@@ -21,6 +21,7 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
 
         self.dummy_env = env.unwrapped.wrapped_env
         self._collision = self.unwrapped._collision
+        self._restitution_coef = self.unwrapped._restitution_coef
 
         # Point radius
         self.size = 0.4
@@ -82,7 +83,7 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
         
         # cheeck if the next state is in bound
         # * here next_obs might be out of bounds. Enforce it
-        if not (-pi <= next_obs[2] <= pi):
+        if  next_obs[2]< -pi or next_obs[2] >pi:
             print("enforce yaw") 
             next_obs[2] = angle_normalize(next_obs[2])        
         
@@ -92,25 +93,22 @@ class PointUMazeOneStepTransitionWrapper(gym.Wrapper):
         assert -10 <= next_obs[4] <= 10, "y-velocity out of bounds after mj sim step"
         assert -10 <= next_obs[5] <= 10, "yaw-velocity out of bounds after mj sim step"
         
-        
-        
         old_pos = state[:2].copy()
         new_pos = next_obs[:2].copy()
         
         # Checks if the new_position is in the wall
         collision = self._collision.detect(old_pos, new_pos)
-        ic(collision)
         if collision is not None:
+            ic(collision)
+            # return state
             adjust_pos = collision.point + self._restitution_coef * collision.rest()
             if self._collision.detect(old_pos, adjust_pos) is not None:
                 # If pos is also not in the wall, we give up computing the position
-                # self.wrapped_env.set_xy(old_pos)
-                next_obs[:2] = old_pos
+                next_obs = state.copy()
+                print("also not in wall, give up computing the position")
             else:
                 # self.wrapped_env.set_xy(pos)
                 next_obs[:2] = adjust_pos
-                
-
         return next_obs
 
     def isValid(self, state: np.ndarray) -> bool:

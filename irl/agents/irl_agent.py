@@ -181,7 +181,7 @@ class IRL_Agent(BaseAgent):
         """
         Train the policy/actor using learned reward
         """
-        print("\nTraining agent policy...")
+        # print("\nTraining agent policy...")
         self.actor.learn(total_timesteps=1000, log_interval=5)
         train_log = {"Policy loss": 0}
         return train_log

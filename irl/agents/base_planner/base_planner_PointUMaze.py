@@ -2,7 +2,6 @@ from math import pi, sin, cos
 from typing import Union, Tuple
 
 import numpy as np
-from mujoco_maze.agent_model import AgentModel
 
 from ompl import util as ou
 from ompl import base as ob
@@ -85,7 +84,7 @@ class PointStatePropagator(oc.StatePropagator):
     def __init__(
         self,
         si: oc.SpaceInformation,
-        agent_model: AgentModel,
+        agent_model,
         velocity_limits: float = 10,
     ):
         super().__init__(si)

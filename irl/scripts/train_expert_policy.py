@@ -1,5 +1,8 @@
 import argparse
 import os
+
+from numpy.core.shape_base import block
+os.environ["D4RL_SUPPRESS_IMPORT_ERROR"] = "1"
 import sys
 from typing import Optional
 
@@ -47,6 +50,12 @@ def build_env(env_name: str):
     elif env_name in ["AntUMaze-v0", "AntUMaze-v1"]:
         import mujoco_maze
         env = gym.make(env_name)
+    elif env_name == "maze2d-umaze-dense-v1":
+        import d4rl
+        env = gym.make(env_name)
+    elif env_name == "antmaze-umaze-v2":
+        raise NotImplementedError("antmaze-umaze-v2 is not implemented yet")
+    
     else:
         raise ValueError("Environment {} not supported yet ...".format(env_name))
     return Monitor(env)
@@ -81,7 +90,7 @@ def train_policy(
         eval_env=eval_env,
         best_model_save_path=f"./logs/{env_name}/{algo}/best_model",
         log_path=f"./logs/{env_name}/{algo}/results",
-        n_eval_episodes=5,
+        n_eval_episodes=20,
         eval_freq=10_000,
         verbose=1,
     )
@@ -194,11 +203,14 @@ def visualize_policy(env, model, num_episodes=10, render=True):
         obs = env.reset()
         ep_ret, ep_len = 0.0, 0
         done = False
+        
+        path = [obs[:2]]
 
         while not done:
             action, _states = model.predict(obs, deterministic=True)
             obs, reward, done, info = env.step(action)
-
+            path.append(obs[:2])
+            
             ep_ret += reward
             ep_len += 1
 
@@ -208,6 +220,11 @@ def visualize_policy(env, model, num_episodes=10, render=True):
                 except KeyboardInterrupt:
                     sys.exit(0)
             if done:
+                path=np.asarray(path)
+                plt.figure()
+                plt.plot(path[:, 0], path[:, 1])
+                plt.grid()
+                plt.savefig("render.png")
                 total_ep_returns.append(ep_ret)
                 total_ep_lengths.append(ep_len)
                 obs = env.reset()
@@ -229,7 +246,7 @@ def main():
     parser.add_argument(
         "--env_name",
         type=str,
-        choices=["NavEnv-v0", "Pendulum-v0", "PointUMaze-v0", "PointUMaze-v1", "AntUMaze-v0", "AntUMaze-v1"],
+        choices=["NavEnv-v0", "Pendulum-v0", "maze2d-umaze-dense-v1", "antmaze-umaze-v2"],
         required=True,
     )
     parser.add_argument("--algo", type=str, default="SAC")
@@ -239,7 +256,7 @@ def main():
     parser.add_argument("--reward_threshold", type=float)
 
     parser.add_argument("--resume_training", action="store_true")
-    parser.add_argument("--timeWrapper", "-wrap", action="store_true")
+    parser.add_argument("--timeWrapper", action="store_true")
     parser.add_argument("--cuda", action="store_true")
     parser.add_argument("--train", "-t", action="store_true")
     parser.add_argument("--render", "-r", action="store_true")
