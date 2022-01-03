@@ -208,7 +208,6 @@ class PointStatePropagator(oc.StatePropagator):
         for k in range(2):
             self.ctrl_temp[k] = control[k]
         
-        del i, j, k
         # ==== Propagate qpos and qvel with given control===
         # assume MinMaxControlDuration = 1 and frame_skip = 1
         self.agent_model.set_state(self.qpos_temp, self.qvel_temp)
@@ -217,10 +216,10 @@ class PointStatePropagator(oc.StatePropagator):
         next_obs = self.agent_model._get_obs()
 
         # ==== Copy Mujoco State to OMPL State ====
-        for i in range(2):
-            result[0][i] = next_obs[i]
-        for j in range(2):
-            result[1][j] = next_obs[2+j]
+        for p in range(2):
+            result[0][p] = next_obs[p]
+        for q in range(2):
+            result[1][q] = next_obs[2+q]
         # ==== End of propagate ====
 
     def canPropagateBackward(self) -> bool:
@@ -252,8 +251,6 @@ class BasePlannerPointUMaze(BasePlannerUMaze):
         self.state_dim = 4  # * This is 4 now qpos + qvel (2 each)
         self.control_dim = 2
 
-        # TODO: Check qpos and qvel this is not the same as the mujoco_maze
-
         # qpos
         self.qpos_low  = np.array([0, 0]) + self.offset
         self.qpos_high = np.array([3, 3]) + self.offset
@@ -281,10 +278,6 @@ class BasePlannerPointUMaze(BasePlannerUMaze):
     def goal(self, value):
         self._goal_pos = value
     
-    @goal_pos.deleter
-    def goal_pos(self):
-        del self._goal_pos
-    
     @property
     def goal_threshold(self):
         return self._goal_threshold
@@ -293,10 +286,6 @@ class BasePlannerPointUMaze(BasePlannerUMaze):
     def goal_threshold(self, value):
         self._goal_threshold = value
         
-    @goal_threshold.deleter
-    def goal_threshold(self):
-        del self._goal_threshold
-    
     def set_goal(self, goal_pos: np.ndarray, threshold: float):
         # goal position and goal radius
         # self.goal_pos = np.array([0.5, 0.5]) + self.offset
@@ -348,7 +337,6 @@ class BasePlannerPointUMaze(BasePlannerUMaze):
             raise ValueError("Goal position is not set. please call set_goal() first")
         if self._goal_threshold is None:
             raise ValueError("Goal threshold is not set. please call set_goal() first")
-        ic(self._goal_pos, self._goal_threshold)
         return PointUMazeGoalState(self.si, self.goal_pos, self.goal_threshold)
 
     def makeStateValidityChecker(self):
@@ -448,7 +436,7 @@ if __name__ == "__main__":
     else:
         raise ValueError("Unknown planner type.")
     
-    for i in range(10):
+    for i in range(5):
         obs = env.reset()
         old_sim_state = env.unwrapped.sim.get_state()
         
