@@ -1,26 +1,28 @@
+from typing import List
+
 import numpy as np
 import gym
 from stable_baselines3 import SAC
 
 from irl.agents.base_agent import BaseAgent
-from irl.agents.mlp_reward import MLPReward
-from irl.scripts.replay_buffer import ReplayBuffer
+# from irl.planners import 
+# from irl.agents.base_planner.base_planner_PointUMaze import ControlPlanner, GeometricPlanner
+from irl.rewards.mlp_reward import MLPReward
+from irl.utils.replay_buffer import ReplayBuffer
+from irl.utils.wrappers import MazeIRLWrapper
+import irl.utils.pytorch_util as ptu
+import irl.utils.utils as utils
+import irl.utils.types as types
 
-import irl.scripts.pytorch_util as ptu
-import irl.scripts.utils as utils
-from irl.agents.irl_env_wrapper import IRLEnv
 
-
-class IRL_Agent(BaseAgent):
+class IRLAgent(BaseAgent):
     def __init__(
         self,
         env: gym.Env,
         agent_params: dict,
-        env_name: str,
-        plannerType: str,
-        buffer_size: int = 10_000,
+        plannerType: str
     ):
-        super(IRL_Agent, self).__init__()
+        super(IRLAgent, self).__init__()
 
         # init vars
         self.env = env
@@ -37,60 +39,33 @@ class IRL_Agent(BaseAgent):
         )
 
         # create a wrapper env with learned reward
-        self.irl_env = IRLEnv(self.env, self.reward)
+        self.irl_env = MazeIRLWrapper(self.env, self.reward)
 
-        # actor/policy with wrapped env
+        # actor/policy with wrapped irl env
         self.actor = SAC("MlpPolicy", self.irl_env, verbose=1, device=ptu.device)
 
         self.state_dim = self.agent_params["ob_dim"]
 
-        # choose control planning or geomtric planning
-        use_control_plan = plannerType.lower() in ["sst", "rrt"]    
-    
-        if env_name == "NavEnv-v0":
-            # TODO: (Yifan) I'm not sure which script is for NavEnv-v0
-            pass
+        # choose control planning or geometric planning
+        # if plannerType.lower() in ["sst", "rrt"]:
+        #     self.planner = ControlPlanner(self.env, plannerType, log_level=0)
+        #     print(f"Using {plannerType.upper()} control planner")
 
-        elif env_name == "Pendulum-v0":
-            # only implement control plan for pendulum for now
-            from irl.agents.base_planner.base_planner_pendulum import SSTPlanner
-            
-            print(f"only implemented SST in {env_name}!")
-            
-            self.planner = SSTPlanner()
-            print(f"Using SST contol planner in {env_name}...")
-        
-        elif env_name in ["PointUMaze-v0", "PointUMaze-v1"]:
-            if use_control_plan:
-                from irl.agents.base_planner.base_planner_PointUMaze import ControlPlanner
-
-                self.planner = ControlPlanner(self.env, plannerType, log_level=0)
-                print(f"Using {plannerType.upper()} contol planner in {env_name}...")
-
-            else:
-                from irl.agents.base_planner.base_planner_PointUMaze import GeometricPlanner
-
-                self.planner = GeometricPlanner(self.env, plannerType, log_level=0)
-                print(f"Using {plannerType.upper()} geometric planner in {env_name}...")
+        # elif:
+        #     self.planner = GeometricPlanner(self.env, plannerType, log_level=0)
+        #     print(f"Using {plannerType.upper()} geometric planner")
+        # else:
+        #     raise ValueError(f"{plannerType} not supported")
                 
-
-        # Replay buffer to hold demo transitions (maximum transitions)
-        self.demo_buffer = ReplayBuffer(buffer_size)
-        self.sample_buffer = ReplayBuffer(buffer_size)
+        # Replay buffer to hold demo transitions
+        self.demo_buffer = ReplayBuffer()
 
     def train_reward(self):
-        """
-        Train the reward function
-        """
+        """Train the reward function"""
         print("\nTraining agent reward function...")
         demo_transitions = self.sample_transitions(
-            self.agent_params["transitions_per_reward_update"], demo=True
+            self.agent_params["transitions_per_reward_update"]
         )
-
-        # TODO: (Yifan)
-        # ? Do we need this line? It's not being called
-        # agent_transitions = self.sample_transitions(
-        #     self.agent_params['transitions_per_reward_update'])
 
         # Update OMPL SimpleSetup object cost function with current learned reward
         self.planner.update_ss_cost(self.reward.cost_fn)
@@ -189,30 +164,8 @@ class IRL_Agent(BaseAgent):
     #####################################################
     #####################################################
 
-    def add_to_buffer(self, paths, demo: bool = False):
-        """
-        Add paths to demo buffer
-        """
-        if demo:
-            self.demo_buffer.add_rollouts(paths)
-        else:
-            self.sample_buffer.add_rollouts(paths)
+    def add_to_buffer(self, paths):
+        self.demo_buffer.add_rollouts(paths)
 
-    def sample_rollouts(self, batch_size: int, demo: bool = False):
-        """
-        Sample paths from demo buffer
-        """
-        if demo:
-            return self.demo_buffer.sample_recent_rollouts(batch_size)
-        else:
-            return self.sample_buffer.sample_recent_rollouts(batch_size)
-
-    def sample_transitions(self, batch_size: int, demo: bool = False):
-        """
-        Sample transitions from demo buffer
-        returns observations, actions, rewards, next_observations, terminals
-        """
-        if demo:
-            return self.demo_buffer.sample_random_data(batch_size)
-        else:
-            return self.sample_buffer.sample_recent_data(batch_size)
+    def sample_transitions(self, batch_size: int) -> List[types.Transition]:
+        return self.demo_buffer.sample_random_transitions(batch_size)

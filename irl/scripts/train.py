@@ -5,23 +5,25 @@ import random
 import time
 import uuid
 from collections import OrderedDict
+from tqdm import tqdm
+import h5py
 
 import gym
+import d4rl
+
 import numpy as np
 import torch
 
-from tqdm import tqdm
 from ompl import util as ou
 
-
-from irl.agents.irl_agent import IRL_Agent
-import irl.scripts.pytorch_util as ptu
-import irl.scripts.utils as utils
-from irl.scripts.logger import Logger
+from irl.agents.irl_agent import IRLAgent
+import irl.utils.pytorch_util as ptu
+import irl.utils.utils as utils
+import irl.utils.types as types
+from irl.utils.logger import Logger
 
 try:
     from icecream import install  # noqa
-
     install()
 except ImportError:  # Graceful fallback if IceCream isn't installed.
     ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
@@ -35,9 +37,9 @@ MAX_VIDEO_LEN = 40  # we overwrite this in the code below
 NEWER_PYTHON_VERSION = sys.version_info.major == 3 and sys.version_info.minor >= 8
 
 CUSTOM_OBJECTS = {
-        "learning_rate": 0.0,
-        "lr_schedule": lambda _: 0.0,
-        "clip_range": lambda _: 0.0,
+    "learning_rate": 0.0,
+    "lr_schedule": lambda _: 0.0,
+    "clip_range": lambda _: 0.0,
 }
 
 
@@ -75,13 +77,7 @@ class Trainer:
         self.logger = Logger(self.params["logdir"])
 
         # Set random seeds
-        seed = self.params["seed"]
-        ou.RNG(seed)
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)
+        self.set_seeds()
 
         ptu.init_gpu(use_gpu=not self.params["no_gpu"], gpu_id=self.params["which_gpu"])
 
@@ -95,62 +91,50 @@ class Trainer:
         MAX_VIDEO_LEN = self.params["ep_len"]
 
         # simulation timestep, will be used for video saving
-        self.fps = 10
-        self.save_dir = os.path.join(
-            os.path.dirname(os.path.realpath(__file__)), f"../../models/{self.params['planner_type']}"
-        )
-        if not (os.path.exists(self.save_dir)):
-            os.makedirs(self.save_dir)
+        # self.fps = 10
+        # self.save_dir = os.path.join(
+        #     os.path.dirname(os.path.realpath(__file__)), f"../../models/{self.params['planner_type']}"
+        # )
+        # if not (os.path.exists(self.save_dir)):
+        #     os.makedirs(self.save_dir)
+
+    def set_seeds(self):
+        """Set random seeds"""
+        seed = self.params["seed"]
+        rng = np.random.RandomState(seed)
+        env_seed = rng.randint(0, (1 << 31) - 1)
+        print(f"Using random seed {env_seed} for environments")
+        ou.RNG(env_seed)
+        random.seed(env_seed)
+        np.random.seed(env_seed)
+        torch.manual_seed(env_seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(env_seed)
 
     def init_env(self):
-        """
-        Initialize the orgianl environment.
-        """
-        if self.params["env_name"] == "NavEnv-v0":
-            import gym_nav
-
+        """Initialize environments"""
+        if self.params["env_name"] in ["maze2d-umaze-v1", "antmaze-umaze-v1"]:
             self.env = gym.make(self.params["env_name"])
-        elif self.params["env_name"] == "Pendulum-v0":
-            from irl.scripts.wrapper.pendulum_env_wrapper import PendulumWrapper
-
-            env = gym.make(self.params["env_name"])
-            # *Note we only modify the Pendulum-v0 to swap the x and y axis.
-            self.env = PendulumWrapper(env)
-
-        elif self.params["env_name"] in ["PointUMaze-v0", "PointUMaze-v1"]:
-            # v0 adn v1 has different reward function.
-            # since we are not using the true rewad, they are the same.
-            import mujoco_maze
-            from irl.scripts.wrapper.remove_timeDim_wrapper import RemovTimeFeatureWrapper
-            from irl.scripts.wrapper.one_step_PointUMaze_wrapper import PointUMazeOneStepTransitionWrapper
-            # * This env includes the time at the last axis, which should be removed.
-            # wrap the one step transition AFTER time dim is REMOVED.
-            self.env = PointUMazeOneStepTransitionWrapper(RemovTimeFeatureWrapper(gym.make(self.params["env_name"])))
-
+            print(f"Initialized environment {self.params['env_name']}")
         else:
             raise ValueError(f"Environment {self.params['env_name']} is not supported")
 
+
     def init_agent(self):
-        """
-        Initialize the IRL agent.
-        """
-        # Are the observations images?
-        img = len(self.env.observation_space.shape) > 2
-        # Observation and action sizes
-        ob_dim = (
-            self.env.observation_space.shape
-            if img
-            else self.env.observation_space.shape[0]
-        )
-        # * We only consider envriment with continuous action space
+        """Initialize the IRL agent"""
+        assert len(self.env.observation_space.shape) < 2, "Cannot handle image observations"
+        ob_dim = self.env.observation_space.shape[0]
+
+        assert isinstance(self.env.action_space, gym.spaces.Box), "Only consider continuous action space"
         ac_dim = self.env.action_space.shape[0]
+
+        print(f"Observation space dimension {ob_dim}, action space dimension {ac_dim}")
         self.params["agent_params"]["ac_dim"] = ac_dim
         self.params["agent_params"]["ob_dim"] = ob_dim
 
-        self.agent = IRL_Agent(
+        self.agent = IRLAgent(
             self.env,
             self.params["agent_params"],
-            self.params["env_name"],
             self.params["planner_type"],
         )
 
@@ -159,10 +143,12 @@ class Trainer:
         self.start_time = time.time()
 
         # Collect expert demonstrations
-        demo_paths = self.collect_demo_trajectories(
-            self.params["expert_policy"], self.params["demo_size"]
+        demo_trajectories = self.collect_demo_trajectories(
+            self.params["expert_filename"], 
+            self.params["demo_size"]
         )
-        self.agent.add_to_buffer(demo_paths, demo=True)
+
+        self.agent.add_to_buffer(demo_trajectories)
 
         for itr in tqdm(range(self.params["n_iter"]), dynamic_ncols=True):
             print(f"\n********** Iteration {itr} ************")
@@ -183,12 +169,6 @@ class Trainer:
                 ]
             )
 
-            # Collect agent demonstrations
-            agent_paths, train_video_paths = self.collect_agent_trajectories(
-                self.agent.actor, self.params["demo_size"]
-            )
-
-            self.agent.add_to_buffer(agent_paths)
 
             # Train Reward
             reward_logs = self.agent.train_reward()
@@ -215,64 +195,93 @@ class Trainer:
                 if self.params["save_params"]:
                     self.agent.save(f"{self.params['logdir']}/agent_itr_{itr}.pt")
 
-    def collect_demo_trajectories(self, expert_policy, batch_size: int):
-        """
-        :param expert_policy:  relative path to saved expert policy
-        :return:
-            paths: a list of trajectories
-        """
-
-        assert isinstance(batch_size, int) and batch_size > 0
-        expert_algo = expert_policy[:3].lower()
-
-        if expert_algo == "sac":
-            from stable_baselines3 import SAC
-
-            expert_algo = SAC
-        elif expert_algo == "tqc":
-            from sb3_contrib import TQC
-
-            expert_algo = TQC
-        elif expert_algo == "ppo":
-            from stable_baselines3 import PPO
-
-            expert_algo = PPO
-        else:
-            raise ValueError(f"Expert algorithm {expert_algo} is not supported.")
-
-        expert_policy = os.path.join(
-            os.path.dirname(os.path.realpath(__file__)),
-            "../../rl-trained-agents",
-            expert_policy,
+    def collect_demo_trajectories(self, expert_filename: str, batch_size: int):
+        """Load demonstration trajectories"""
+        dataset = h5py.File(expert_filename, 'r')
+        assert dataset['observations'].shape[1] == self.env.observation_space.shape[0], (
+            f"Demonstration observation dimension {dataset['observations'].shape[1]} "
+            "does not match environment observation space dimension " 
+            f"{self.env.observation_space.shape[0]}"
         )
-        expert_policy = expert_algo.load(
-            expert_policy, device=ptu.device, custom_objects=CUSTOM_OBJECTS
+        assert dataset['actions'].shape[1] == self.env.action_space.shape[0], (
+            f"Demonstration action dimension {dataset['actions'].shape[1]} "
+            "does not match environment action space dimension "
+            f"{self.env.action_space.shape[0]}"
         )
-        print("\nRunning expert policy to collect demonstrations...")
-        demo_paths = utils.sample_trajectories(self.env, expert_policy, batch_size)
-        # demo_paths = utils.pad_absorbing_states(demo_paths)
-        return demo_paths
 
-    def collect_agent_trajectories(self, collect_policy, batch_size):
-        """
-        :param collect_policy:  the current policy which we use to collect data
-        :param batch_size:  the number of trajectories to collect
-        :return:
-            paths: a list trajectories
-            train_video_paths: paths which also contain videos for visualization purposes
+        dones = np.where(dataset['terminals'])[0][:batch_size]
 
-        """
-        print("\nCollecting agent trajectories to be used for training...")
-        paths = utils.sample_trajectories(self.env, collect_policy, batch_size)
-        # paths = utils.pad_absorbing_states(paths)
+        trajectories = []
+        start = 0
+        for end in dones:
+            states = dataset['observations'][start:end+1]
+            actions = dataset['actions'][start:end]
+            trajectory = types.Trajectory(states, actions)
+            trajectories.append(trajectory)
+            start = end + 1
+            # utils.render_trajectory(self.env, states[:, :2], states[:, 2:])
 
-        train_video_paths = None
-        if self.log_video:
-            print("\nCollecting train rollouts to be used for saving videos...")
-            train_video_paths = utils.sample_trajectories(
-                self.env, collect_policy, MAX_NVIDEO, render=True
-            )
-        return paths, train_video_paths
+        import pdb; pdb.set_trace()
+        return trajectories
+        
+    # def collect_demo_trajectories(self, expert_policy, batch_size: int):
+    #     """
+    #     :param expert_policy:  relative path to saved expert policy
+    #     :return:
+    #         paths: a list of trajectories
+    #     """
+
+    #     assert isinstance(batch_size, int) and batch_size > 0
+    #     expert_algo = expert_policy[:3].lower()
+
+    #     if expert_algo == "sac":
+    #         from stable_baselines3 import SAC
+
+    #         expert_algo = SAC
+    #     elif expert_algo == "tqc":
+    #         from sb3_contrib import TQC
+
+    #         expert_algo = TQC
+    #     elif expert_algo == "ppo":
+    #         from stable_baselines3 import PPO
+
+    #         expert_algo = PPO
+    #     else:
+    #         raise ValueError(f"Expert algorithm {expert_algo} is not supported.")
+
+    #     expert_policy = os.path.join(
+    #         os.path.dirname(os.path.realpath(__file__)),
+    #         "../../rl-trained-agents",
+    #         expert_policy,
+    #     )
+    #     expert_policy = expert_algo.load(
+    #         expert_policy, device=ptu.device, custom_objects=CUSTOM_OBJECTS
+    #     )
+    #     print("\nRunning expert policy to collect demonstrations...")
+    #     demo_paths = utils.sample_trajectories(self.env, expert_policy, batch_size)
+    #     # demo_paths = utils.pad_absorbing_states(demo_paths)
+    #     return demo_paths
+
+    # def collect_agent_trajectories(self, collect_policy, batch_size):
+    #     """
+    #     :param collect_policy:  the current policy which we use to collect data
+    #     :param batch_size:  the number of trajectories to collect
+    #     :return:
+    #         paths: a list trajectories
+    #         train_video_paths: paths which also contain videos for visualization purposes
+
+    #     """
+    #     print("\nCollecting agent trajectories to be used for training...")
+    #     paths = utils.sample_trajectories(self.env, collect_policy, batch_size)
+    #     # paths = utils.pad_absorbing_states(paths)
+
+    #     train_video_paths = None
+    #     if self.log_video:
+    #         print("\nCollecting train rollouts to be used for saving videos...")
+    #         train_video_paths = utils.sample_trajectories(
+    #             self.env, collect_policy, MAX_NVIDEO, render=True
+    #         )
+    #     return paths, train_video_paths
 
     def perform_logging(
         self, itr, paths, eval_policy, train_video_paths, reward_logs, policy_logs
@@ -353,25 +362,26 @@ class Trainer:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env_name", type=str, default="NavEnv-v0")
-    parser.add_argument("--exp_name", type=str, default="NavEnv-v0")
-    parser.add_argument(
-        "--expert_policy",
-        type=str,
-        choices=[
-            "SAC_NavEnv-v0",
-            "SAC_Pendulum-v0",
-            "SAC_PointUMaze-v0",
-            "TQC_Pendulum-v0",
-            "TQC_PointUMaze-v0",
-        ],
-    )
+    parser.add_argument("--env_name", type=str, default="maze2d-umaze-v1")
+    parser.add_argument("--exp_name", type=str, default="maze2d-umaze-v1")
+    parser.add_argument("--expert_filename", type=str, default="maze2d-umaze-v1.hdf5")
+    # parser.add_argument(
+    #     "--expert_policy",
+    #     type=str,
+    #     choices=[
+    #         "SAC_NavEnv-v0",
+    #         "SAC_Pendulum-v0",
+    #         "SAC_PointUMaze-v0",
+    #         "TQC_Pendulum-v0",
+    #         "TQC_PointUMaze-v0",
+    #     ],
+    # )
     parser.add_argument(
         "--planner_type",
         "-pt",
         type=str,
         choices=["rrt", "sst", "rrtstar", "prmstar"],
-        required=True,
+        default="rrt"
     )
     parser.add_argument(
         "--n_iter", "-n", type=int, default=100, help="Number of total iterations"
