@@ -45,6 +45,8 @@ from irl.agents.planner_utils import (
 )
 
 from irl.agents.minimum_transition_objective import MinimumTransitionObjective
+from AntWrapper import AntMazeFixedStartWrapper, AntMazeFixedGoalWrapper
+
 
 
 def visualize_path(data=None, goal=[0, 16], save=False):
@@ -276,9 +278,6 @@ class AntMazeStatePropagator(oc.StatePropagator):
 
 class BasePlannerAntMaze(BasePlannerUMaze):
     def __init__(self, env, goal_pos, goal_threshold, use_control=False, log_level=0):
-        """
-        other_wrapper(<TimeLimit<MazeEnv<PointUMaze-v0>>>)  --> <MazeEnv<PointUMaze-v0>>
-        """
         super().__init__()
 
         # Agent Model
@@ -522,9 +521,10 @@ if __name__ == "__main__":
     parser.add_argument("--render", "-r", action="store_true")
     args = parser.parse_args()
 
-    env = gym.make("antmaze-umaze-v2")
-    env.set_target([1, 9])
-    obs = env.reset()
+    env = gym.make("antmaze-umaze-v1")
+    env = AntMazeFixedGoalWrapper(env, goal_pos=(1,0))
+    
+    # env.set_target([0, 8])
     ic(env.observation_space)
     ic(env.action_space)
     ic(env.spec.max_episode_steps)
@@ -544,7 +544,8 @@ if __name__ == "__main__":
             # ic(obs[:2])
             env.render()
 
-    goal_pos = np.array([1, 9])
+    goal_pos = np.asarray(env.unwrapped._goal)
+    ic(goal_pos)
     goal_threshold = 0.5
 
     if args.plannerType.lower() in ["rrt", "sst"]:
@@ -557,6 +558,17 @@ if __name__ == "__main__":
             env, args.plannerType, goal_pos, goal_threshold, log_level=2
         )
 
-    data, _ = planner.plan(obs, 50)
 
-    visualize_path(data, goal_pos)
+    for i in range(1):
+        obs = env.reset()
+        old_sim_state = env.unwrapped.wrapped_env.sim.get_state()
+
+        data, ompl_controls = planner.plan(obs, 60*5)
+        controls = np.asarray([[u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]] for u in ompl_controls])
+        ic(controls.shape)
+        
+        visualize_path(data, goal_pos)
+            
+        
+    
+    

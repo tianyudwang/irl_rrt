@@ -10,18 +10,6 @@ import random
 import gym
 import d4rl
 
-import argparse
-import os
-os.environ["D4RL_SUPPRESS_IMPORT_ERROR"] = "1"
-import time
-from typing import Union, Tuple
-
-import sys
-import random
-
-import gym
-import d4rl
-
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -426,7 +414,7 @@ if __name__ == "__main__":
     print("max_ep_len:", env.spec.max_episode_steps)
     
     use_control = False
-    goal_pos = np.array([1, 1])
+    goal_pos = np.array([0.8, 0.8])
     goal_threshold = 0.1
     if args.plannerType.lower() in ["rrt", "sst"]:
         use_control = True
@@ -457,6 +445,3 @@ if __name__ == "__main__":
                 if done:
                     ic(info)
                     break
-    
-    
-

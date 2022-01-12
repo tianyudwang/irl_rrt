@@ -760,7 +760,7 @@ if __name__ == "__main__":
     # Set propagator step size (0.02 in Mujoco)
     step_size = env.unwrapped.wrapped_env.sim.model.opt.timestep
     si.setPropagationStepSize(step_size)
-    si.setMinMaxControlDuration(minSteps=1, maxSteps=1)  # TODO: what should this be?
+    # si.setMinMaxControlDuration(minSteps=1, maxSteps=1)  # TODO: what should this be?
     # ===========================================================================
     # Allocate and set the planner to the SimpleSetup
     planner = ompl_utils.allocateControlPlanner(si, plannerType=args.planner)

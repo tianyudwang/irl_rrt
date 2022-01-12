@@ -1,8 +1,7 @@
 import argparse
 import os
-
-from numpy.core.shape_base import block
 os.environ["D4RL_SUPPRESS_IMPORT_ERROR"] = "1"
+
 import sys
 from typing import Optional
 
@@ -54,7 +53,9 @@ def build_env(env_name: str):
         import d4rl
         env = gym.make(env_name)
     elif env_name == "antmaze-umaze-v2":
-        raise NotImplementedError("antmaze-umaze-v2 is not implemented yet")
+        import d4rl
+        env = gym.make(env_name)
+        
     
     else:
         raise ValueError("Environment {} not supported yet ...".format(env_name))
@@ -250,7 +251,7 @@ def main():
         required=True,
     )
     parser.add_argument("--algo", type=str, default="SAC")
-    parser.add_argument("--num_steps", "-n", type=int, default=100_000)
+    parser.add_argument("--num_steps", "-n", type=int, default=int(1e6))
     parser.add_argument("--learning_rate", "-lr", type=float, default=3e-4)
     parser.add_argument("--learning_starts", "-start", type=float, default=10_000)
     parser.add_argument("--reward_threshold", type=float)
