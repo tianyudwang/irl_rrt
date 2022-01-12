@@ -3,7 +3,7 @@ import numpy as np
 
 class AntMazeFixedStartWrapper(gym.Wrapper):
     """Fix the start location at (0, 0) in antmaze-umaze-v1"""
-    def __init__(self, env):
+    def __init__(self, env, start):
         super().__init__(env)
         self.unwrapped.wrapped_env.reset_model = self.reset_model
         
@@ -34,3 +34,9 @@ class AntMazeFixedGoalWrapper(gym.Wrapper):
     def reset(self):
         self.set_target(self.goal_pos)
         return super().reset()
+
+
+class AntMazeFixStartAndGoalWrapper(AntMazeFixedStartWrapper, AntMazeFixedGoalWrapper):
+    def __init__(self, env, goal_pos = (0, 8)):
+        super().__init__(env, goal_pos)
+    

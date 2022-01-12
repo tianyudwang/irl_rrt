@@ -144,7 +144,6 @@ class AntMazeGoalState(baseUMazeGoalState):
         for j in range(15, 29):
             state[2][j - 15] = 0
 
-
 class AntMazeStateValidityChecker(ob.StateValidityChecker):
     def __init__(
         self,
@@ -522,7 +521,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     env = gym.make("antmaze-umaze-v1")
-    env = AntMazeFixedGoalWrapper(env, goal_pos=(1,0))
+    env = AntMazeFixedGoalWrapper(env, goal_pos=(8,0))
     
     # env.set_target([0, 8])
     ic(env.observation_space)
@@ -563,7 +562,7 @@ if __name__ == "__main__":
         obs = env.reset()
         old_sim_state = env.unwrapped.wrapped_env.sim.get_state()
 
-        data, ompl_controls = planner.plan(obs, 60*5)
+        data, ompl_controls = planner.plan(obs, 60*60)
         controls = np.asarray([[u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]] for u in ompl_controls])
         ic(controls.shape)
         

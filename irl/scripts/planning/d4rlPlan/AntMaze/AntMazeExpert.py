@@ -1,3 +1,5 @@
+import os
+os.environ['D4RL_SUPPRESS_IMPORT_ERROR'] = '1'
 import numpy as np
 import pickle
 import gzip
@@ -7,8 +9,11 @@ from d4rl.locomotion import maze_env, ant, swimmer
 from d4rl.locomotion.wrappers import NormalizedBoxEnv
 import torch
 from PIL import Image
-import os
-os.environ['D4RL_SUPPRESS_IMPORT_ERROR'] = '1'
+
+from tqdm import tqdm
+from icecream import ic
+
+from AntWrapper import AntMazeFixedStartWrapper, AntMazeFixedGoalWrapper, AntMazeFixStartAndGoalWrapper
 
 
 def reset_data():
@@ -61,7 +66,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--noisy', action='store_true', help='Noisy actions')
     parser.add_argument('--maze', type=str, default='umaze', help='Maze type. umaze, medium, or large')
-    parser.add_argument('--num_samples', type=int, default=int(1e6), help='Num samples to collect')
+    parser.add_argument('--num_samples', "-n", type=int, default=int(1e6), help='Num samples to collect')
     parser.add_argument('--env', type=str, default='Ant', help='Environment type')
     parser.add_argument('--policy_file', type=str, default='policy_file', help='file_name')
     parser.add_argument('--max_episode_steps', default=1000, type=int)
@@ -86,13 +91,17 @@ def main():
         raise NotImplementedError
     
     if args.env == 'Ant':
-        env = NormalizedBoxEnv(ant.AntMazeEnv(maze_map=maze, maze_size_scaling=4.0, non_zero_reset=args.multi_start))
+        env = NormalizedBoxEnv(ant.AntMazeEnv(maze_map=maze, maze_size_scaling=4.0, non_zero_reset=args.multi_start, v2_resets=False))
     elif args.env == 'Swimmer':
         env = NormalizedBoxEnv(swimmer.SwimmerMazeEnv(mmaze_map=maze, maze_size_scaling=4.0, non_zero_reset=args.multi_start))
     else:
         raise NotImplementedError
     
-    env.set_target()
+    ic(args.max_episode_steps)
+    # env.set_target()
+    env = AntMazeFixedGoalWrapper(env)
+    
+    
     s = env.reset()
     act = env.action_space.sample()
     done = False
@@ -124,7 +133,7 @@ def main():
     
     ts = 0
     num_episodes = 0
-    for _ in range(args.num_samples):
+    for _ in tqdm(range(args.num_samples)):
         act, waypoint_goal = data_collection_policy(s)
 
         if args.noisy:
@@ -137,6 +146,8 @@ def main():
             timeout = True
             #done = True
         
+        assert env.target_goal == (0,8)
+        ic(env.target_goal)
         append_data(data, s[:-2], act, r, env.target_goal, done, timeout, env.physics.data)
 
         if len(data['observations']) % 10000 == 0:
@@ -148,7 +159,7 @@ def main():
             done = False
             ts = 0
             s = env.reset()
-            env.set_target_goal()
+            # env.set_target_goal()
             if args.video:
                 frames = np.array(frames)
                 save_video('./videos/', args.env + '_navigation', frames, num_episodes)
