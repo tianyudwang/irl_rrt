@@ -163,8 +163,8 @@ def test_maze2d_RRT_planner():
         assert len(rollout_states) == len(states)
         assert np.linalg.norm(rollout_states - states) < 0.1
 
-# if __name__ == '__main__':
+if __name__ == '__main__':
 #     test_feasible_region()
-#     test_maze2d_RRTstar_planner()
+    test_maze2d_RRTstar_planner()
 #     test_maze2d_PRMstar_planner()
 #     test_maze2d_RRT_planner()

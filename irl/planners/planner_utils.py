@@ -26,8 +26,11 @@ class MinimumTransitionObjective(ob.PathLengthOptimizationObjective):
         return ob.Cost(1.0)
 
 
-class ShortestDistanceObjective(ob.PathLengthOptimizationObjective):
-    """Shortest path length in 2D"""
+class Maze2DShortestDistanceObjective(ob.PathLengthOptimizationObjective):
+    """
+    Shortest path length in 2D
+    Assumes state[0] is ob.RealVectorStateInternal
+    """
 
     def __init__(self, si: Union[oc.SpaceInformation, ob.SpaceInformation]):
         super().__init__(si)
@@ -36,6 +39,18 @@ class ShortestDistanceObjective(ob.PathLengthOptimizationObjective):
         distance = np.linalg.norm([s1[0][0] - s2[0][0], s1[0][1] - s2[0][1]])
         return ob.Cost(distance)
 
+class AntMazeShortestDistanceObjective(ob.PathLengthOptimizationObjective):
+    """
+    Shortest path length in 2D
+    Assumes state[0] is ob.SE3StateInternal
+    """
+
+    def __init__(self, si: Union[oc.SpaceInformation, ob.SpaceInformation]):
+        super().__init__(si)
+
+    def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
+        distance = np.linalg.norm([s1[0].getX() - s2[0].getX(), s1[0].getY() - s2[0].getY()])
+        return ob.Cost(distance)
 
 def make_RealVectorBounds(
         dim: int, 
@@ -64,23 +79,27 @@ def make_RealVectorBounds(
     return vector_bounds
 
 
-def path_to_numpy(path: Union[og.PathGeometric, oc.PathControl]) -> np.ndarray:
+def path_to_numpy(
+        path: Union[og.PathGeometric, oc.PathControl],
+        dim: int
+    ) -> np.ndarray:
     """Convert OMPL path to numpy array"""
-    state_dim = 4
     states = np.fromstring(
         path.printAsMatrix(), 
         dtype=np.float32, 
         sep="\n"
-    ).reshape(-1, state_dim)
+    ).reshape(-1, dim)
     return states
 
-def controls_to_numpy(controls: List[oc.Control]):
+def controls_to_numpy(
+        controls: List[oc.Control],
+        dim: int
+    ) -> np.ndarray:
     """Convert OMPL controls to numpy array"""
-    control_dim = 2 
-    controls_np = [np.empty(control_dim) for _ in range(len(controls))]
+    controls_np = [np.empty(dim) for _ in range(len(controls))]
 
     for i in range(len(controls)):
-        for j in range(control_dim):
+        for j in range(dim):
             controls_np[i][j] = controls[i][j]
     return controls_np
 
@@ -143,20 +162,17 @@ def copyR3State2Data(state: ob.State, data: np.ndarray) -> None:
 def copySO3State2Data(state: ob.State, data: np.ndarray) -> None:
     """
     Copy SO3 state to data (modified in place)
-    OMPL SO3 is [x, y, z, w]
-    Mujoco is [w, x, y, z]
+    Both OMPL and mujoco quaternions are scalar last [x, y, z, w]
     """
-    data[0] = state.w
-    data[1] = state.x
-    data[2] = state.y
-    data[3] = state.z
+    data[0] = state.x
+    data[1] = state.y
+    data[2] = state.z
+    data[3] = state.w
 
 
 def copySE3State2Data(state: ob.State, data: np.ndarray) -> None:
     """
     Copy SE3 state to data (modified in place)
-    OMPL SE3 is [x, y, z, qx, qy, qz, qw,]
-    Mujoco is [x, y, z, qw, qx, qy, qz,]
     """
     copyR3State2Data(state, data[0:3])
     copySO3State2Data(state.rotation(), data[3:7])
