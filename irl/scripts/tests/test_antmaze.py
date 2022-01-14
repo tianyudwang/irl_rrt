@@ -1,5 +1,5 @@
 """
-Usage: pytest test_antmaze.py or pytest test_maze2d.py::test_feasible_region
+Usage: pytest test_antmaze.py or pytest test_antmaze.py::test_feasible_region
 Check antmaze-umaze-v1 environment specifications
 """
 

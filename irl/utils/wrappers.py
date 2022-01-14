@@ -92,19 +92,3 @@ class Maze2DTransitionWrapper(gym.Wrapper):
         obs = np.clip(obs, self.state_low, self.state_high)
         assert self.is_valid(obs), "Next state not valid after one_step_transition"
         return obs
-
-#########################################################################
-
-class AntMazeFixedGoalWrapper(gym.Wrapper):
-    """Fix the goal location at (0, 8) for antmaze-umaze-v1"""
-    def __init__(self, env): 
-        # self.unwrapped.set_target_goal = self.set_target_goal()
-        pass
-
-    def set_target_goal(self, goal_input=None):
-
-        self.unwrapped.target_goal = (0, 8)
-      
-        print ('Target Goal: ', self.unwrapped.target_goal)
-        ## Make sure that the goal used in self._goal is also reset:
-        self.unwrapped._goal = self.unwrapped.target_goal

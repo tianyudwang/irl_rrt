@@ -170,10 +170,11 @@ class Trainer:
                 self.params["scalar_log_freq"] != -1,
             ])
 
-            # Train Reward
+            # Train reward
             reward_logs = self.agent.train_reward()
-            for step in range(self.params["policy_updates_per_iter"]):
-                policy_logs = self.agent.train_policy()
+            
+            # Train actor
+            policy_logs = self.agent.train_policy(self.params['timesteps_per_policy_update'])
 
             # log/save
             if self.log_video or self.logmetrics:
@@ -333,9 +334,9 @@ def main():
         help="Number of reward updates per iteration",
     )
     parser.add_argument(
-        "--policy_updates_per_iter",
+        "--timesteps_per_policy_update",
         type=int,
-        default=10,
+        default=10000,
         help="Number of policy updates per iteration",
     )
     parser.add_argument(
@@ -367,7 +368,7 @@ def main():
     parser.add_argument("--output_size", type=int, default=1)
     parser.add_argument("--learning_rate", "-lr", type=float, default=0.01)
 
-    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=12)
     parser.add_argument("--no_gpu", "-ngpu", action="store_true")
     parser.add_argument("--which_gpu", "-gpu_id", default=0)
     parser.add_argument("--video_log_freq", type=int, default=-1)

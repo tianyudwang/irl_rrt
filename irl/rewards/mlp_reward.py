@@ -27,7 +27,7 @@ class MLPReward(nn.Module):
             n_layers=self.n_layers,
             size=self.size,
             activation='relu',
-            output_activation='sigmoid'
+            output_activation='relu'
         ).to(ptu.device)
 
         self.optimizer = optim.Adam(

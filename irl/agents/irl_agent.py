@@ -3,6 +3,7 @@ from typing import List
 import numpy as np
 import gym
 from stable_baselines3 import SAC
+from stable_baselines3.common.logger import configure
 
 from irl.agents.base_agent import BaseAgent
 from irl.planners.geometric_planner import (
@@ -45,7 +46,11 @@ class IRLAgent(BaseAgent):
         self.irl_env = wrappers.IRLWrapper(self.env, self.reward)
 
         # actor/policy with wrapped irl env
-        self.actor = SAC("MlpPolicy", self.irl_env, verbose=0, device=ptu.device)
+        self.actor = SAC("MlpPolicy", self.irl_env, verbose=1, device=ptu.device)
+        # set up logger
+        tmp_path = "/tmp/sb3_log/irl_rrt"
+        logger = configure(tmp_path, ["stdout", "csv", "tensorboard"])
+        self.actor.set_logger(logger)
 
         self.state_dim = self.agent_params["ob_dim"]
 
@@ -160,12 +165,12 @@ class IRLAgent(BaseAgent):
     #            paths.append(path)
     #        return paths
 
-    def train_policy(self):
+    def train_policy(self, timesteps=1000):
         """
         Train the policy/actor using learned reward
         """
         print("\nTraining agent policy...")
-        self.actor.learn(total_timesteps=1000, log_interval=5)
+        self.actor.learn(total_timesteps=timesteps, log_interval=5)
         train_log = {"Policy loss": 0}
         return train_log
 
