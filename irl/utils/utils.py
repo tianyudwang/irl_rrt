@@ -2,6 +2,7 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 import irl.utils.pytorch_util as ptu
+from irl.utils import types
 
 ############################################
 ############################################
@@ -49,9 +50,14 @@ def sample_trajectory(env, policy, render=False, render_mode=('rgb_array')):
         terminals.append(done)
 
         if done:
+            obs.append(ob.copy())
             break
 
-    return Path(obs, image_obs, acs, log_probs, rewards, next_obs, terminals)
+    return types.TrajectoryWithReward(
+        states=np.array(obs), 
+        actions=np.array(acs), 
+        rewards=np.array(rewards)
+    )
 
 def get_log_prob(policy, action):
     """
@@ -149,3 +155,47 @@ def render_trajectory(env, qpos, qvel):
     for i in range(qpos.shape[0]):
         env.set_state(qpos[i], qvel[i])
         env.render()
+
+def check_valid(dataset):
+    observations = dataset['observations']
+    actions = dataset['actions']
+
+    state_low = np.array([0.5, 0.5, -5., -5.])
+    state_high = np.array([3.5, 3.5, 5., 5.])
+
+    size = 0.1
+    # Square extents
+    square_x_min = 0.5 + size
+    square_x_max = 3.5 - size
+    square_y_min = 0.5 + size
+    square_y_max = 3.5 - size
+
+    # Rectangle extents
+    rect_x_min = 1.5 - size
+    rect_x_max = 2.5 + size
+    rect_y_min = 0.5 + size
+    rect_y_max = 2.5 + size
+
+    action_low = np.array([-1, -1])
+    action_high = np.array([1, 1])
+
+    for state in observations:
+        assert (state_low <= state).all() and (state <= state_high).all(), (
+            f"State {state} not in bounds"
+        )
+
+        in_square = ((square_x_min <= state[0] <= square_x_max) 
+            and (square_y_min <= state[1] <= square_y_max))
+        assert in_square, (
+            f"State {state} not in square"
+        )
+
+        in_rect = ((rect_x_min <= state[0] <= rect_x_max) 
+            and (rect_y_min <= state[1] <= rect_y_max))
+        assert not in_rect, (
+            f"State {state} in rectangle"
+        )
+
+    for action in actions:
+        assert (action_low <= action).all() and (action <= action_high).all(), (
+            f"Action {action} not in bounds")

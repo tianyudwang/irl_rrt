@@ -18,9 +18,7 @@ from ompl import util as ou
 
 from irl.agents.irl_agent import IRLAgent
 import irl.utils.pytorch_util as ptu
-import irl.utils.utils as utils
-import irl.utils.types as types
-from irl.utils.logger import Logger
+from irl.utils import utils, types, wrappers, logger
 
 try:
     from icecream import install  # noqa
@@ -74,10 +72,7 @@ class Trainer:
         ## INIT
         #############
         # Get params, create logger
-        self.logger = Logger(self.params["logdir"])
-
-        # Set random seeds
-        self.set_seeds()
+        self.logger = logger.Logger(self.params["logdir"])
 
         ptu.init_gpu(use_gpu=not self.params["no_gpu"], gpu_id=self.params["which_gpu"])
 
@@ -85,18 +80,21 @@ class Trainer:
         self.init_env()
         self.init_agent()
 
+        # Set random seeds
+        self.set_seeds()
+
         # Maximum length for episodes
         self.params["ep_len"] = self.env.spec.max_episode_steps
         global MAX_VIDEO_LEN
         MAX_VIDEO_LEN = self.params["ep_len"]
 
         # simulation timestep, will be used for video saving
-        # self.fps = 10
-        # self.save_dir = os.path.join(
-        #     os.path.dirname(os.path.realpath(__file__)), f"../../models/{self.params['planner_type']}"
-        # )
-        # if not (os.path.exists(self.save_dir)):
-        #     os.makedirs(self.save_dir)
+        self.fps = 10
+        self.save_dir = os.path.join(
+            os.path.dirname(os.path.realpath(__file__)), f"../../models/{self.params['planner_type']}"
+        )
+        if not (os.path.exists(self.save_dir)):
+            os.makedirs(self.save_dir)
 
     def set_seeds(self):
         """Set random seeds"""
@@ -110,12 +108,19 @@ class Trainer:
         torch.manual_seed(env_seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed(env_seed)
+        self.env.seed(env_seed)
+
 
     def init_env(self):
         """Initialize environments"""
-        if self.params["env_name"] in ["maze2d-umaze-v1", "antmaze-umaze-v1"]:
-            self.env = gym.make(self.params["env_name"])
+        if self.params["env_name"] == "maze2d-umaze-v1":
+            env = gym.make(self.params["env_name"])
+            env = wrappers.Maze2DFixedStartWrapper(env)
+            env = wrappers.Maze2DTransitionWrapper(env)
+            self.env = env
             print(f"Initialized environment {self.params['env_name']}")
+        elif self.params["env_name"] == "antmaze-umaze-v1":
+            env = gym.make(self.params["env_name"])
         else:
             raise ValueError(f"Environment {self.params['env_name']} is not supported")
 
@@ -154,21 +159,16 @@ class Trainer:
             print(f"\n********** Iteration {itr} ************")
 
             # decide if videos should be rendered/logged at this iteration
-            self.log_video = all(
-                [
-                    (itr + 1) % self.params["video_log_freq"] == 0,
-                    self.params["video_log_freq"] != -1,
-                ]
-            )
+            self.log_video = all([
+                (itr + 1) % self.params["video_log_freq"] == 0,
+                self.params["video_log_freq"] != -1,
+            ])
 
             # decide if metrics should be logged
-            self.logmetrics = all(
-                [
-                    (itr + 1) % self.params["scalar_log_freq"] == 0,
-                    self.params["scalar_log_freq"] != -1,
-                ]
-            )
-
+            self.logmetrics = all([
+                (itr + 1) % self.params["scalar_log_freq"] == 0,
+                self.params["scalar_log_freq"] != -1,
+            ])
 
             # Train Reward
             reward_logs = self.agent.train_reward()
@@ -186,9 +186,7 @@ class Trainer:
                 print("\nBeginning logging procedure...")
                 self.perform_logging(
                     itr,
-                    agent_paths,
                     self.agent.actor,
-                    train_video_paths,
                     reward_logs,
                     policy_logs,
                 )
@@ -209,6 +207,8 @@ class Trainer:
             f"{self.env.action_space.shape[0]}"
         )
 
+        utils.check_valid(dataset)
+
         dones = np.where(dataset['terminals'])[0][:batch_size]
 
         trajectories = []
@@ -221,70 +221,12 @@ class Trainer:
             start = end + 1
             # utils.render_trajectory(self.env, states[:, :2], states[:, 2:])
 
-        import pdb; pdb.set_trace()
+        print(f"Loaded {batch_size} trajectories of {np.sum([len(traj) for traj in trajectories])} transitions")
         return trajectories
-        
-    # def collect_demo_trajectories(self, expert_policy, batch_size: int):
-    #     """
-    #     :param expert_policy:  relative path to saved expert policy
-    #     :return:
-    #         paths: a list of trajectories
-    #     """
 
-    #     assert isinstance(batch_size, int) and batch_size > 0
-    #     expert_algo = expert_policy[:3].lower()
-
-    #     if expert_algo == "sac":
-    #         from stable_baselines3 import SAC
-
-    #         expert_algo = SAC
-    #     elif expert_algo == "tqc":
-    #         from sb3_contrib import TQC
-
-    #         expert_algo = TQC
-    #     elif expert_algo == "ppo":
-    #         from stable_baselines3 import PPO
-
-    #         expert_algo = PPO
-    #     else:
-    #         raise ValueError(f"Expert algorithm {expert_algo} is not supported.")
-
-    #     expert_policy = os.path.join(
-    #         os.path.dirname(os.path.realpath(__file__)),
-    #         "../../rl-trained-agents",
-    #         expert_policy,
-    #     )
-    #     expert_policy = expert_algo.load(
-    #         expert_policy, device=ptu.device, custom_objects=CUSTOM_OBJECTS
-    #     )
-    #     print("\nRunning expert policy to collect demonstrations...")
-    #     demo_paths = utils.sample_trajectories(self.env, expert_policy, batch_size)
-    #     # demo_paths = utils.pad_absorbing_states(demo_paths)
-    #     return demo_paths
-
-    # def collect_agent_trajectories(self, collect_policy, batch_size):
-    #     """
-    #     :param collect_policy:  the current policy which we use to collect data
-    #     :param batch_size:  the number of trajectories to collect
-    #     :return:
-    #         paths: a list trajectories
-    #         train_video_paths: paths which also contain videos for visualization purposes
-
-    #     """
-    #     print("\nCollecting agent trajectories to be used for training...")
-    #     paths = utils.sample_trajectories(self.env, collect_policy, batch_size)
-    #     # paths = utils.pad_absorbing_states(paths)
-
-    #     train_video_paths = None
-    #     if self.log_video:
-    #         print("\nCollecting train rollouts to be used for saving videos...")
-    #         train_video_paths = utils.sample_trajectories(
-    #             self.env, collect_policy, MAX_NVIDEO, render=True
-    #         )
-    #     return paths, train_video_paths
 
     def perform_logging(
-        self, itr, paths, eval_policy, train_video_paths, reward_logs, policy_logs
+        self, itr, eval_policy, reward_logs, policy_logs
     ):
 
         last_log = reward_logs[-1]
@@ -298,7 +240,7 @@ class Trainer:
         )
 
         # save eval rollouts as videos in tensorboard event file
-        if self.log_video and train_video_paths != None:
+        if self.log_video:
             eval_video_paths = utils.sample_trajectories(
                 self.env, eval_policy, MAX_NVIDEO, render=True
             )
@@ -327,12 +269,10 @@ class Trainer:
         # TODO: should add a visualization tool to check the trained reward function
         if self.logmetrics:
             # returns, for logging
-            train_returns = [path["reward"].sum() for path in paths]
-            eval_returns = [eval_path["reward"].sum() for eval_path in eval_paths]
+            eval_returns = [np.sum(eval_path.rewards) for eval_path in eval_paths]
 
             # episode lengths, for logging
-            train_ep_lens = [len(path["reward"]) for path in paths]
-            eval_ep_lens = [len(eval_path["reward"]) for eval_path in eval_paths]
+            eval_ep_lens = [len(eval_path) for eval_path in eval_paths]
 
             # decide what to log
             logs = OrderedDict()
@@ -341,12 +281,6 @@ class Trainer:
             logs["Eval_MaxReturn"] = np.max(eval_returns)
             logs["Eval_MinReturn"] = np.min(eval_returns)
             logs["Eval_AverageEpLen"] = np.mean(eval_ep_lens)
-
-            logs["Train_AverageReturn"] = np.mean(train_returns)
-            logs["Train_StdReturn"] = np.std(train_returns)
-            logs["Train_MaxReturn"] = np.max(train_returns)
-            logs["Train_MinReturn"] = np.min(train_returns)
-            logs["Train_AverageEpLen"] = np.mean(train_ep_lens)
 
             logs["TimeSinceStart"] = time.time() - self.start_time
             logs.update(last_log)
@@ -381,7 +315,7 @@ def main():
         "-pt",
         type=str,
         choices=["rrt", "sst", "rrtstar", "prmstar"],
-        default="rrt"
+        default="rrtstar"
     )
     parser.add_argument(
         "--n_iter", "-n", type=int, default=100, help="Number of total iterations"
@@ -407,7 +341,7 @@ def main():
     parser.add_argument(
         "--transitions_per_reward_update",
         type=int,
-        default=100,
+        default=128,
         help="Number of agent transitions per reward update",
     )
     parser.add_argument(
@@ -423,7 +357,7 @@ def main():
     parser.add_argument(
         "--eval_batch_size",
         type=int,
-        default=10,
+        default=64,
         help="Number of policy rollouts for evaluation",
     )
 

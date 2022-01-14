@@ -20,15 +20,6 @@ class IRLWrapper(gym.RewardWrapper):
         self.last_obs = obs.copy()
         return obs
 
-class MazeIRLWrapper(IRLWrapper):
-    """Wrapper to provide one step transition function"""
-    def __init__(self, env, reward):
-        super().__init__(env, reward)
-
-    def one_step_transition(self, state, action):
-        """Compute one step transition explicitly given current state and action"""
-        raise NotImplementedError
-
 class Maze2DFixedStartWrapper(gym.Wrapper):
     """Fix the start location at (3, 1) in maze2d-umaze-v1"""
     def __init__(self, env):
@@ -57,6 +48,52 @@ class Maze2DFixedLocationWrapper(gym.Wrapper):
         qvel = self.init_qvel 
         self.unwrapped.set_state(qpos, qvel)
         return self.unwrapped._get_obs()
+
+class Maze2DTransitionWrapper(gym.Wrapper):
+    """Expose an one-step transition function"""
+    def __init__(self, env):
+        super().__init__(env)
+        
+        self.state_low = np.array([0.5, 0.5, -5., -5.])
+        self.state_high = np.array([3.5, 3.5, 5., 5.])
+
+        size = 0.1
+        # Square extents
+        self.square_x_min = 0.5 + size
+        self.square_x_max = 3.5 - size
+        self.square_y_min = 0.5 + size
+        self.square_y_max = 3.5 - size   
+
+        # Rectangle extents
+        self.rect_x_min = 1.5 - size
+        self.rect_x_max = 2.5 + size
+        self.rect_y_min = 0.5 + size
+        self.rect_y_max = 2.5 + size
+
+    def is_valid(self, state):
+        in_square = ((self.square_x_min <= state[0] <= self.square_x_max) 
+            and (self.square_y_min <= state[1] <= self.square_y_max))
+        assert in_square, (
+            f"State {state} not in square"
+        )
+
+        in_rect = ((self.rect_x_min <= state[0] <= self.rect_x_max) 
+            and (self.rect_y_min <= state[1] <= self.rect_y_max))
+        assert not in_rect, (
+            f"State {state} in rectangle"
+        )
+        return True
+
+    def one_step_transition(self, state, action):
+        """Set mujoco simulator to state and apply action to get next state"""
+        qpos, qvel = state[:2], state[2:]
+        self.unwrapped.set_state(qpos, qvel)
+        obs, _, _, _ = self.unwrapped.step(action)
+        obs = np.clip(obs, self.state_low, self.state_high)
+        assert self.is_valid(obs), "Next state not valid after one_step_transition"
+        return obs
+
+#########################################################################
 
 class AntMazeFixedGoalWrapper(gym.Wrapper):
     """Fix the goal location at (0, 8) for antmaze-umaze-v1"""

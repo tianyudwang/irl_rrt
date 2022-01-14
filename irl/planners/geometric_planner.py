@@ -32,14 +32,14 @@ class Maze2DGeometricPlanner(Maze2DBasePlanner):
         self.ss.setGoal(goal)
 
         # Define optimization objective
-        objective = planner_utils.Maze2DShortestDistanceObjective(self.si)
-        self.ss.setOptimizationObjective(objective)
+        self.objective = planner_utils.Maze2DShortestDistanceObjective(self.si)
+        self.ss.setOptimizationObjective(self.objective)
 
 
     def plan(
         self, 
         start: np.ndarray, 
-        solveTime: Optional[float] = 5.0
+        solveTime: Optional[float] = 2.0
     ) -> Tuple[int, np.ndarray, np.ndarray]:
         """
         Return a list of states and controls (None for geometric planners)
@@ -50,12 +50,18 @@ class Maze2DGeometricPlanner(Maze2DBasePlanner):
         self.ss.setStartState(start)
 
         status = self.ss.solve(solveTime)
+        print(status.asString())
         if bool(status):
             # Retrieve path
             geometricPath = self.ss.getSolutionPath()
+            print(
+                f"Path length is {geometricPath.length():.2f}, "
+                f"cost is {geometricPath.cost(self.objective).value():.2f}"
+            )
             states = planner_utils.path_to_numpy(geometricPath, dim=4)
             return planner_utils.PlannerStatus[status.asString()], states, None
         else:
+            print(status.asString())
             raise ValueError("OMPL is not able to solve under current cost function")
 
 class Maze2DRRTstarPlanner(Maze2DGeometricPlanner):
@@ -103,7 +109,6 @@ class AntMazeGeometricPlanner(AntMazeBasePlanner):
         # Define optimization objective
         objective = planner_utils.AntMazeShortestDistanceObjective(self.si)
         self.ss.setOptimizationObjective(objective)
-
 
     def plan(
         self, 

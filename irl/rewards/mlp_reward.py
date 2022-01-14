@@ -88,7 +88,7 @@ class MLPReward(nn.Module):
             "Reward_loss": ptu.to_numpy(loss)
         }
 
-        print("Reward training loss:", loss.item(), demo_loss.item(), agent_loss.item())
+        print(f"Reward training loss: {loss.item():.2f}, {demo_loss.item():.2f}, {agent_loss.item()}") 
         return train_reward_log
         
     def calc_path_rewards(self, paths):

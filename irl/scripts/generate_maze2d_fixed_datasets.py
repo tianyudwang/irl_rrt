@@ -53,10 +53,14 @@ def main():
     max_episode_steps = env.env._max_episode_steps
     target = env.unwrapped._target
 
+    state_low = np.array([0.5, 0.5, -5., -5.])
+    state_high = np.array([3.5, 3.5, 5., 5.])
+
     data = reset_data()
 
     for _ in range(args.num_trajectories):
         s = env.reset()
+        s = np.clip(s, state_low, state_high)
         done = False
         ts = 0
         controller = waypoint_controller.WaypointController(maze)
@@ -75,6 +79,8 @@ def main():
             append_data(data, s, act, target, done, env.sim.data)
 
             s, _, _, _ = env.step(act)
+            s = np.clip(s, state_low, state_high)
+
             ts += 1 
 
             if args.render:

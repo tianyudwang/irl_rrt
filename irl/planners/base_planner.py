@@ -3,6 +3,7 @@ from typing import Tuple, Optional, Union
 import numpy as np
 
 from ompl import base as ob
+from ompl import util as ou
 
 import irl.planners.planner_utils as planner_utils
 
@@ -108,7 +109,7 @@ class Maze2DBasePlanner:
     To be inherited by specific geometric/control planners
     """
     def __init__(self):
-        pass
+        ou.setLogLevel(ou.LogLevel.LOG_WARN)
 
     def get_StateSpace(self) -> ob.StateSpace:
         """
@@ -180,10 +181,14 @@ class Maze2DBasePlanner:
             start_state[i] = start[i].item()
 
         assert self.state_validity_checker.isValid(start_state), (
-            f"Start state {start} is not  valid"
+            f"Start state {start} is not valid"
         )        
         return start_state
 
+    def update_ss_cost(self, cost_fn):
+        # Set up cost function
+        costObjective = planner_utils.Maze2DIRLObjective(self.si, cost_fn)
+        self.ss.setOptimizationObjective(costObjective)
 
 #################################################################################
 #################################################################################

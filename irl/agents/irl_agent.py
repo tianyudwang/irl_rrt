@@ -5,14 +5,17 @@ import gym
 from stable_baselines3 import SAC
 
 from irl.agents.base_agent import BaseAgent
-# from irl.planners import 
-# from irl.agents.base_planner.base_planner_PointUMaze import ControlPlanner, GeometricPlanner
+from irl.planners.geometric_planner import (
+    Maze2DRRTstarPlanner, 
+    Maze2DPRMstarPlanner
+)
+from irl.planners.control_planner import (
+    Maze2DSSTPlanner,
+    Maze2DRRTPlanner
+)
 from irl.rewards.mlp_reward import MLPReward
-from irl.utils.replay_buffer import ReplayBuffer
-from irl.utils.wrappers import MazeIRLWrapper
+from irl.utils import utils, types, wrappers, replay_buffer
 import irl.utils.pytorch_util as ptu
-import irl.utils.utils as utils
-import irl.utils.types as types
 
 
 class IRLAgent(BaseAgent):
@@ -39,26 +42,31 @@ class IRLAgent(BaseAgent):
         )
 
         # create a wrapper env with learned reward
-        self.irl_env = MazeIRLWrapper(self.env, self.reward)
+        self.irl_env = wrappers.IRLWrapper(self.env, self.reward)
 
         # actor/policy with wrapped irl env
-        self.actor = SAC("MlpPolicy", self.irl_env, verbose=1, device=ptu.device)
+        self.actor = SAC("MlpPolicy", self.irl_env, verbose=0, device=ptu.device)
 
         self.state_dim = self.agent_params["ob_dim"]
 
-        # choose control planning or geometric planning
-        # if plannerType.lower() in ["sst", "rrt"]:
-        #     self.planner = ControlPlanner(self.env, plannerType, log_level=0)
-        #     print(f"Using {plannerType.upper()} control planner")
-
-        # elif:
-        #     self.planner = GeometricPlanner(self.env, plannerType, log_level=0)
-        #     print(f"Using {plannerType.upper()} geometric planner")
-        # else:
-        #     raise ValueError(f"{plannerType} not supported")
+        # choose geometric/control planner
+        if plannerType.lower() == 'rrtstar':
+            self.planner = Maze2DRRTstarPlanner()
+            print("Initializing geometric based RRT* planner...")
+        elif plannerType.lower() == 'prmstar':
+            self.planner = Maze2DPRMstarPlanner()
+            print("Initializing geometric based PRM* planner...")
+        elif plannerType.lower() == 'sst':
+            self.planner = Maze2DSSTPlanner(self.env.unwrapped)
+            print("Initializing control based SST planner...")
+        elif plannerType.lower() == 'rrt':
+            self.planner = Maze2DRRTPlanner(self.env.unwrapped)
+            print("Initializing control based RRT planner...")
+        else:
+            raise ValueError(f"{plannerType} not supported")
                 
         # Replay buffer to hold demo transitions
-        self.demo_buffer = ReplayBuffer()
+        self.demo_buffer = replay_buffer.ReplayBuffer()
 
     def train_reward(self):
         """Train the reward function"""
@@ -74,14 +82,16 @@ class IRLAgent(BaseAgent):
         agent_paths = []
         agent_log_probs = []
         for i in range(self.agent_params["transitions_per_reward_update"]):
+            print(f"Planning path for {i}/{self.agent_params['transitions_per_reward_update']} ...")
             # Sample expert transitions (s, a, s')
             # and find optimal path from s' to goal
-            ob, ac, log_probs, rewards, next_ob, done = [
-                var[i] for var in demo_transitions
-            ]
-            path, controls = self.planner.plan(next_ob)
+            state = demo_transitions[i].state
+            action = demo_transitions[i].action
+            next_state = demo_transitions[i].next_state
+
+            status, path, controls = self.planner.plan(next_state)
             
-            path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
+            path = np.concatenate((state.reshape(1, self.state_dim), path), axis=0)
             demo_paths.append([path])
 
             # and find optimal path from s' to goal
@@ -89,28 +99,26 @@ class IRLAgent(BaseAgent):
             log_probs = []
             for j in range(self.agent_params["agent_actions_per_demo_transition"]):
                 # Sample agent transitions (s, a, s') at each expert state s
-                agent_ac, _ = self.actor.predict(ob)
-                log_prob = utils.get_log_prob(self.actor, agent_ac)
-                agent_next_ob = self.env.one_step_transition(ob, agent_ac)
-                
-                #! "agent_next_ob" is likely not valid  
+                agent_action, _ = self.actor.predict(state)
+                log_prob = utils.get_log_prob(self.actor, agent_action)
+                agent_next_state = self.env.one_step_transition(state, agent_action)
 
                 # Find optimal path from s' to goal
-                path, controls = self.planner.plan(agent_next_ob)
+                status, path, controls = self.planner.plan(agent_next_state)
                 if path is None:
                     import sys
                     import pickle
                     data = {
-                        "agent_ac": agent_ac,
-                        "ob": ob,
-                        "agent_next_ob": agent_next_ob 
+                        "agent_action": agent_action,
+                        "state": state,
+                        "agent_next_state": agent_next_state 
                     }
                     with open(f'./data_{i}{j}.pkl', 'wb') as f:
                         pickle.dump(data, f)
                     print("SAVED!")
                     sys.exit(0)
 
-                path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
+                path = np.concatenate((state.reshape(1, self.state_dim), path), axis=0)
                 paths.append(path)
                 log_probs.append(log_prob)
             agent_paths.append(paths)

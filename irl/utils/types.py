@@ -27,6 +27,23 @@ class Trajectory:
         if len(self.actions) == 0:
             raise ValueError("Degenerate trajectory: must have at least one action.")
 
+@dataclass(frozen=True)
+class TrajectoryWithReward(Trajectory):
+    """A `Trajectory` that additionally includes reward information."""
+
+    rewards: np.ndarray
+    """Reward, shape (trajectory_len, ). dtype float."""
+
+    def __post_init__(self):
+        """Performs input validation, including for rews."""
+        super().__post_init__()
+
+        if self.rewards.shape != (len(self.actions),):
+            raise ValueError(
+                "rewards must be 1D array, one entry for each action: "
+                f"{self.rewards.shape} != ({len(self.actions)},)",
+            )
+
 
 @dataclass(frozen=True)
 class Transition:

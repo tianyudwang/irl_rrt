@@ -16,6 +16,31 @@ PlannerStatus = {
     'Approximate solution': 2,
 }
 
+class Maze2DIRLObjective(ob.OptimizationObjective):
+    def __init__(self, si, cost_fn):
+        super().__init__(si)
+        self.cost_fn = cost_fn
+
+        self.s1_data = np.empty(4, dtype=np.float32)
+        self.s2_data = np.empty(4, dtype=np.float32)
+
+    def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
+        """Query the neural network cost function for a cost between two states"""
+        self.cp_state_to_data(s1, self.s1_data)
+        self.cp_state_to_data(s2, self.s2_data)
+
+        c = self.cost_fn(self.s1_data, self.s2_data)
+        return ob.Cost(c)
+
+    def cp_state_to_data(self, state: ob.State, data: np.ndarray):
+        # 2D position and velocity
+        # ob.State is a CompoundState of 2 RealVectorState's        
+        data[0] = state[0][0]
+        data[1] = state[0][1]
+        data[2] = state[1][0]
+        data[3] = state[1][1]
+
+
 class MinimumTransitionObjective(ob.PathLengthOptimizationObjective):
     """Minimum number of transitions"""
 

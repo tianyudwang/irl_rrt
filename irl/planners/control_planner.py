@@ -123,7 +123,7 @@ class Maze2DControlPlanner(Maze2DBasePlanner):
         self.ss.setGoal(goal)
 
         # Define optimization objective
-        objective = planner_utils.ShortestDistanceObjective(self.si)
+        objective = planner_utils.Maze2DShortestDistanceObjective(self.si)
         self.ss.setOptimizationObjective(objective)
 
     def get_ControlSpace(self, space: ob.StateSpace) -> oc.ControlSpace:
