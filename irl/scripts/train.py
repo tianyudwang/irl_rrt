@@ -1,5 +1,6 @@
 import argparse
 import os
+os.environ["D4RL_SUPPRESS_IMPORT_ERROR"]="1" # suppress d4rl import warning
 import sys
 import random
 import time
@@ -118,7 +119,16 @@ class Trainer:
             env = wrappers.Maze2DFixedStartWrapper(env)
             env = wrappers.Maze2DTransitionWrapper(env)
             self.env = env
-            print(f"Initialized environment {self.params['env_name']}")
+            # add an env for evaluation (dense reward)
+            eval_env = gym.make("maze2d-umaze-dense-v1") 
+            eval_env = wrappers.Maze2DFixedStartWrapper(eval_env)
+            eval_env = wrappers.Maze2DTransitionWrapper(eval_env)
+            self.eval_env = eval_env
+            
+            print(f"\nInitialized environment {self.params['env_name']}")
+            print(f"Eval env reference min score: {self.eval_env.unwrapped.ref_min_score}")
+            print(f"Eval env reference max score: {self.eval_env.unwrapped.ref_max_score}")
+            
         elif self.params["env_name"] == "antmaze-umaze-v1":
             env = gym.make(self.params["env_name"])
         else:
@@ -133,7 +143,7 @@ class Trainer:
         assert isinstance(self.env.action_space, gym.spaces.Box), "Only consider continuous action space"
         ac_dim = self.env.action_space.shape[0]
 
-        print(f"Observation space dimension {ob_dim}, action space dimension {ac_dim}")
+        print(f"Observation space dimension {ob_dim}, action space dimension {ac_dim}\n")
         self.params["agent_params"]["ac_dim"] = ac_dim
         self.params["agent_params"]["ob_dim"] = ob_dim
 
@@ -235,9 +245,10 @@ class Trainer:
         #######################
 
         # Evaluate the agent policy in true environment
+        # TODO: (Yifan) I add an eval env with dense reward.
         print("\nCollecting data for eval...")
         eval_paths = utils.sample_trajectories(
-            self.env, eval_policy, self.params["eval_batch_size"], render=False
+            self.eval_env, eval_policy, self.params["eval_batch_size"], render=False
         )
 
         # save eval rollouts as videos in tensorboard event file

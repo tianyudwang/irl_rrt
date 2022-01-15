@@ -108,8 +108,10 @@ class Maze2DBasePlanner:
     Initialize StateSpace, StateValidityChecker, and ProblemDefinition
     To be inherited by specific geometric/control planners
     """
-    def __init__(self):
+    def __init__(self, timeLimit: Optional[float] = None):
         ou.setLogLevel(ou.LogLevel.LOG_WARN)
+        # Time limit
+        self.timeLimit = timeLimit
 
     def get_StateSpace(self) -> ob.StateSpace:
         """
@@ -152,7 +154,8 @@ class Maze2DBasePlanner:
         space.sanityChecks()
 
         #########################################
-        print(f"\nCreated state space {space.getName()} with {space.getDimension()} dimensions")
+        print("\n" + "-"*20 + " Planning Config " + "-"*20)
+        print(f"Created State Space {space.getName()} with {space.getDimension()} dimensions")
         bounds = [subspace.getBounds() for subspace in space.getSubspaces()]
         lows, highs = [], []
         for bound in bounds:

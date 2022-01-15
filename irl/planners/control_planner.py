@@ -200,7 +200,7 @@ class Maze2DRRTPlanner(Maze2DControlPlanner):
 
 
 #################################################################################
-# OMPL control based planner does not work for antmaze yet
+# ! OMPL control based planner does not work for antmaze yet
 #################################################################################
 
 # class AntMazeStatePropagator(oc.StatePropagator):

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import gym
@@ -24,7 +24,8 @@ class IRLAgent(BaseAgent):
         self,
         env: gym.Env,
         agent_params: dict,
-        plannerType: str
+        plannerType: str,
+        timeLimit: Optional[float] = None,
     ):
         super(IRLAgent, self).__init__()
 
@@ -54,22 +55,21 @@ class IRLAgent(BaseAgent):
 
         self.state_dim = self.agent_params["ob_dim"]
 
-        # choose geometric/control planner
+        # set up planner
+        # TODO: Timelimit implement for Maze2DGeormetricPlanner
         if plannerType.lower() == 'rrtstar':
-            self.planner = Maze2DRRTstarPlanner()
-            print("Initializing geometric based RRT* planner...")
+            self.planner = Maze2DRRTstarPlanner(timeLimit)
         elif plannerType.lower() == 'prmstar':
-            self.planner = Maze2DPRMstarPlanner()
-            print("Initializing geometric based PRM* planner...")
+            self.planner = Maze2DPRMstarPlanner(timeLimit)
         elif plannerType.lower() == 'sst':
             self.planner = Maze2DSSTPlanner(self.env.unwrapped)
-            print("Initializing control based SST planner...")
         elif plannerType.lower() == 'rrt':
             self.planner = Maze2DRRTPlanner(self.env.unwrapped)
-            print("Initializing control based RRT planner...")
         else:
             raise ValueError(f"{plannerType} not supported")
-                
+        
+        flag = "control" if plannerType.lower() in ["rrt", "sst"] else "geometric"
+        print(f"Initializing {flag} based {plannerType.upper()} planner...")
         # Replay buffer to hold demo transitions
         self.demo_buffer = replay_buffer.ReplayBuffer()
 
@@ -87,7 +87,7 @@ class IRLAgent(BaseAgent):
         agent_paths = []
         agent_log_probs = []
         for i in range(self.agent_params["transitions_per_reward_update"]):
-            print(f"Planning path for {i}/{self.agent_params['transitions_per_reward_update']} ...")
+            print(f"\nPlanning path for {i}/{self.agent_params['transitions_per_reward_update']} ...")
             # Sample expert transitions (s, a, s')
             # and find optimal path from s' to goal
             state = demo_transitions[i].state
