@@ -151,6 +151,7 @@ class Trainer:
             self.env,
             self.params["agent_params"],
             self.params["planner_type"],
+            self.params["timeLimit"],
         )
 
     def training_loop(self):
@@ -311,6 +312,8 @@ def main():
     parser.add_argument("--env_name", type=str, default="maze2d-umaze-v1")
     parser.add_argument("--exp_name", type=str, default="maze2d-umaze-v1")
     parser.add_argument("--expert_filename", type=str, default="maze2d-umaze-v1.hdf5")
+    parser.add_argument("--timeLimit", type=float, default=2)
+    
     # parser.add_argument(
     #     "--expert_policy",
     #     type=str,
@@ -412,7 +415,7 @@ def main():
     logdir = os.path.join(data_path, logdir)
     params["logdir"] = logdir
     if not (os.path.exists(logdir)):
-        os.makedirs(logdir)
+        os.makedirs(logdir, exist_ok=True)
 
     #####################
     ### RUN TRAINING  ###
