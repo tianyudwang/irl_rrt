@@ -49,6 +49,20 @@ class Maze2DFixedLocationWrapper(gym.Wrapper):
         self.unwrapped.set_state(qpos, qvel)
         return self.unwrapped._get_obs()
 
+class Maze2DFirstExitWrapper(gym.Wrapper):
+    """Set done variable to True if reached goal target"""
+    def __init__(self, env):
+        super().__init__(env)
+
+    def step(self, action):
+        ob, reward, done, info = super().step(action)
+        if done or np.linalg.norm(ob[0:2] - self.unwrapped._target) <= 0.5:
+            done = True
+        else:
+            done = False
+        return ob, reward, done, info
+
+
 class Maze2DTransitionWrapper(gym.Wrapper):
     """Expose an one-step transition function"""
     def __init__(self, env):

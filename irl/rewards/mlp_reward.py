@@ -27,7 +27,7 @@ class MLPReward(nn.Module):
             n_layers=self.n_layers,
             size=self.size,
             activation='relu',
-            output_activation='relu'
+            output_activation='sigmoid'
         ).to(ptu.device)
 
         self.optimizer = optim.Adam(
@@ -99,3 +99,10 @@ class MLPReward(nn.Module):
         rewards = self.forward(states, next_states)
         
         return rewards
+
+    def save(self, filename):
+        """Save the neural network""" 
+        torch.save(self.mlp.state_dict(), filename)
+
+    def load(self, filename):
+        self.mlp.load_state_dict(torch.load(filename, map_location=ptu.device))

@@ -118,12 +118,14 @@ class Trainer:
             env = gym.make(self.params["env_name"])
             env = wrappers.Maze2DFixedStartWrapper(env)
             env = wrappers.Maze2DTransitionWrapper(env)
+            env = wrappers.Maze2DFirstExitWrapper(env)
             self.env = env
             # add an env for evaluation (dense reward)
-            eval_env = gym.make("maze2d-umaze-dense-v1") 
-            eval_env = wrappers.Maze2DFixedStartWrapper(eval_env)
-            eval_env = wrappers.Maze2DTransitionWrapper(eval_env)
-            self.eval_env = eval_env
+            # eval_env = gym.make("maze2d-umaze-dense-v1") 
+            # eval_env = wrappers.Maze2DFixedStartWrapper(eval_env)
+            # eval_env = wrappers.Maze2DTransitionWrapper(eval_env)
+            # self.eval_env = eval_env
+            self.eval_env = env
             
             print(f"\nInitialized environment {self.params['env_name']}")
             print(f"Eval env reference min score: {self.eval_env.unwrapped.ref_min_score}")
@@ -189,11 +191,11 @@ class Trainer:
 
             # log/save
             if self.log_video or self.logmetrics:
-                self.agent.actor.save(
-                    os.path.join(
-                        self.save_dir, f"SAC_{self.params['env_name']}_itr_{itr}"
-                    )
-                )
+                model_dir = os.path.join(self.params['logdir'], f"models_itr_{itr:02d}")
+                if not (os.path.exists(model_dir)):
+                    os.makedirs(model_dir, exist_ok=True)
+                self.agent.reward.save(os.path.join(model_dir, "reward.pt"))
+                self.agent.actor.save(os.path.join(model_dir, "SAC"))
                 # perform logging
                 print("\nBeginning logging procedure...")
                 self.perform_logging(
@@ -233,7 +235,8 @@ class Trainer:
             start = end + 1
             # utils.render_trajectory(self.env, states[:, :2], states[:, 2:])
 
-        print(f"Loaded {batch_size} trajectories of {np.sum([len(traj) for traj in trajectories])} transitions")
+        print(f"Loaded {batch_size} trajectories of "
+              f"{np.sum([len(traj) for traj in trajectories])} transitions")
         return trajectories
 
 
@@ -259,14 +262,7 @@ class Trainer:
             )
 
             # save train/eval videos
-            print("\nSaving train and eval rollouts as videos...")
-            self.logger.log_paths_as_videos(
-                train_video_paths,
-                itr,
-                fps=self.fps,
-                max_videos_to_save=MAX_NVIDEO,
-                video_title="train_rollouts",
-            )
+            print("\nSaving eval rollouts as videos...")
             self.logger.log_paths_as_videos(
                 eval_video_paths,
                 itr,
@@ -350,7 +346,7 @@ def main():
     parser.add_argument(
         "--timesteps_per_policy_update",
         type=int,
-        default=10000,
+        default=15000,
         help="Number of policy updates per iteration",
     )
     parser.add_argument(
@@ -365,10 +361,6 @@ def main():
         default=1,
         help="Number of agent actions sampled for each expert_transition",
     )
-    #    parser.add_argument(
-    #        '--rrt_runs', type=int, default=1,
-    #        help='Number of RRT* runs to estimate cost to go'
-    #    )
     parser.add_argument(
         "--eval_batch_size",
         type=int,
@@ -407,6 +399,8 @@ def main():
 
     logdir = (
         args.env_name
+        + "_"
+        + args.planner_type
         + "_"
         + time.strftime("%d-%m-%Y_%H-%M-%S")
         + "_"

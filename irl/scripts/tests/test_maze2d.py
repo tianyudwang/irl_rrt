@@ -83,6 +83,22 @@ def test_maze2d_RRTstar_planner():
 
         # planner_utils.visualize_path(states, goal, save=True)
 
+def test_maze2d_RRTstar_exact_solution():
+    """
+    Plan with termination condition set to exact solution
+    """
+    env_name = "maze2d-umaze-v1"
+    env = gym.make(env_name)
+    env = Maze2DFixedStartWrapper(env)
+    goal = np.array([1., 1.])
+
+    planner = Maze2DRRTstarPlanner()
+    for _ in range(10):
+        obs = env.reset()
+        status, states, controls = planner.plan_exact_solution(start=obs)
+        assert np.linalg.norm([states[-1][0] - goal[0], states[-1][1] - goal[1]]) <= 0.1
+
+
 def test_maze2d_PRMstar_planner():
     """
     Reset the maze2d-umaze-v1 environment and use initial state
@@ -95,12 +111,37 @@ def test_maze2d_PRMstar_planner():
     goal = np.array([1., 1.])
 
     planner = Maze2DPRMstarPlanner()
+
     for _ in range(10):
         obs = env.reset()
         status, states, controls = planner.plan(start=obs)
         assert np.linalg.norm([states[-1][0] - goal[0], states[-1][1] - goal[1]]) <= 0.1
 
         # planner_utils.visualize_path(states, goal, save=True)
+
+# def test_maze2d_PRMstar_multiple_queries():
+#     """
+#     Random start locations with multiple queries 
+#     Reuses previous planning data
+#     This function is not working yet. 
+#     Planning function takes significantly long time and can get stuck.
+#     """
+
+#     env_name = "maze2d-umaze-v1"
+#     env = gym.make(env_name)
+
+#     goal = np.array([1., 1.])
+
+#     planner = Maze2DPRMstarPlanner()
+
+#     for i in range(10):
+#         obs = env.reset()
+#         print(obs)
+
+#         status, states, controls = planner.plan_exact_solution(start=obs, clear_query=True)
+#         assert np.linalg.norm([states[-1][0] - goal[0], states[-1][1] - goal[1]]) <= 0.1
+
+
 
 def test_maze2d_SST_planner():
     """
@@ -165,6 +206,8 @@ def test_maze2d_RRT_planner():
 
 if __name__ == '__main__':
 #     test_feasible_region()
-    test_maze2d_RRTstar_planner()
+    # test_maze2d_RRTstar_planner()
+    # test_maze2d_RRTstar_exact_solution()
+    test_maze2d_PRMstar_multiple_queries()
 #     test_maze2d_PRMstar_planner()
 #     test_maze2d_RRT_planner()

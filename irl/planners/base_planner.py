@@ -12,13 +12,13 @@ class Maze2DGoalState(ob.GoalState):
     """
     Defines a goal region around goal state with threshold 
     In umaze, the goal region is defined as the states whose distance to goal 
-    is smaller than threshold=0.1 in x-y plane
+    is smaller than threshold=0.5 in x-y plane
     """
     def __init__(
         self, 
         si: ob.SpaceInformation, 
         goal: Optional[np.ndarray] = np.array([1., 1.]), 
-        threshold: Optional[float] = 0.1
+        threshold: Optional[float] = 0.5
     ):
         super().__init__(si)
         assert len(goal.shape) == 1 and goal.shape[0] == 2

@@ -94,7 +94,7 @@ class IRLAgent(BaseAgent):
             action = demo_transitions[i].action
             next_state = demo_transitions[i].next_state
 
-            status, path, controls = self.planner.plan(next_state)
+            status, path, controls = self.planner.plan_exact_solution(next_state)
             
             path = np.concatenate((state.reshape(1, self.state_dim), path), axis=0)
             demo_paths.append([path])
@@ -109,7 +109,7 @@ class IRLAgent(BaseAgent):
                 agent_next_state = self.env.one_step_transition(state, agent_action)
 
                 # Find optimal path from s' to goal
-                status, path, controls = self.planner.plan(agent_next_state)
+                status, path, controls = self.planner.plan_exact_solution(agent_next_state)
                 if path is None:
                     import sys
                     import pickle
