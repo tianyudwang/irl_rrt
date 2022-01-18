@@ -7,16 +7,16 @@ import gym
 import d4rl
 import numpy as np
 
-from irl.utils.wrappers import Maze2DFixedStartWrapper, Maze2DFixedLocationWrapper
-from irl.planners.geometric_planner import Maze2DRRTstarPlanner, Maze2DPRMstarPlanner
-from irl.planners.control_planner import Maze2DSSTPlanner, Maze2DRRTPlanner
+import irl.planners.geometric_planner as gp 
+import irl.planners.control_planner as cp
+import irl.utils.wrappers as wrappers
 import irl.planners.planner_utils as planner_utils
 
 def test_fixed_start():
     """Test whether reset location is at (3, 1)"""
     env_name = "maze2d-umaze-v1"
     env = gym.make(env_name)
-    env = Maze2DFixedStartWrapper(env)
+    env = wrappers.Maze2DFixedStartWrapper(env)
 
     start_loc = np.array([3., 1.])
 
@@ -42,7 +42,7 @@ def test_feasible_region():
     """
     env_name = "maze2d-umaze-v1"
     env = gym.make(env_name)
-    env = Maze2DFixedLocationWrapper(env)
+    env = wrappers.Maze2DFixedLocationWrapper(env)
 
     square_low = np.array([0.6, 0.6])
     square_high = np.array([3.4, 3.4])
@@ -72,10 +72,10 @@ def test_maze2d_RRTstar_planner():
 
     env_name = "maze2d-umaze-v1"
     env = gym.make(env_name)
-    env = Maze2DFixedStartWrapper(env)
+    env = wrappers.Maze2DFixedStartWrapper(env)
     goal = np.array([1., 1.])
 
-    planner = Maze2DRRTstarPlanner()
+    planner = gp.Maze2DRRTstarPlanner()
     for _ in range(10):
         obs = env.reset()
         status, states, controls = planner.plan(start=obs)
@@ -93,10 +93,10 @@ def test_maze2d_PRMstar_planner():
 
     env_name = "maze2d-umaze-v1"
     env = gym.make(env_name)
-    env = Maze2DFixedStartWrapper(env)
+    env = wrappers.Maze2DFixedStartWrapper(env)
     goal = np.array([1., 1.])
 
-    planner = Maze2DPRMstarPlanner()
+    planner = gp.Maze2DPRMstarPlanner()
 
     for _ in range(10):
         obs = env.reset()
@@ -137,10 +137,10 @@ def test_maze2d_SST_planner():
 
     env_name = "maze2d-umaze-v1"
     env = gym.make(env_name)
-    env = Maze2DFixedStartWrapper(env)
+    env = wrappers.Maze2DFixedStartWrapper(env)
     goal = np.array([1., 1.])
 
-    planner = Maze2DSSTPlanner(env.unwrapped)
+    planner = cp.Maze2DSSTPlanner(env.unwrapped)
     for _ in range(10):
         obs = env.reset()
         print(obs)
@@ -169,10 +169,10 @@ def test_maze2d_RRT_planner():
 
     env_name = "maze2d-umaze-v1"
     env = gym.make(env_name)
-    env = Maze2DFixedStartWrapper(env)
+    env = wrappers.Maze2DFixedStartWrapper(env)
     goal = np.array([1., 1.])
 
-    planner = Maze2DRRTPlanner(env.unwrapped)
+    planner = cp.Maze2DRRTPlanner(env.unwrapped)
     for _ in range(10):
         obs = env.reset()
         status, states, controls = planner.plan(start=obs, solveTime=20)

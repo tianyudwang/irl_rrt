@@ -8,8 +8,8 @@ import d4rl
 import numpy as np 
 import time
 
-from irl.planners.geometric_planner import AntMazeRRTstarPlanner
-# from irl.planners.control_planner import AntMazeSSTPlanner, AntMazeKPIECEPlanner
+import irl.planners.geometric_planner as gp
+import irl.planners.control_planner as cp
 from irl.utils import wrappers
 
 def test_antmaze_wrappers():
@@ -89,7 +89,7 @@ def test_antmaze_RRTstar_planner():
     goal = (0, 8)
     env.set_target_goal(goal)
 
-    planner = AntMazeRRTstarPlanner()
+    planner = gp.AntMazeRRTstarPlanner()
 
     for _ in range(10):
         obs = env.reset()

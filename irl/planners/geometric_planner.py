@@ -110,8 +110,6 @@ class Maze2DGeometricPlanner(Maze2DBasePlanner):
     #         print(status.asString())
     #         raise ValueError("OMPL is not able to solve under current cost function")
 
-
-
 class Maze2DRRTstarPlanner(Maze2DGeometricPlanner):
     def __init__(self, timeLimit: Optional[float] = None):
         super().__init__(timeLimit)
