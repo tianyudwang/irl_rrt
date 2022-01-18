@@ -36,61 +36,28 @@ class Maze2DGeometricPlanner(Maze2DBasePlanner):
         self.ss.setOptimizationObjective(self.objective)
 
 
-    # def plan(
-    #     self, 
-    #     start: np.ndarray, 
-    #     solveTime: Optional[float] = 2.0,
-    #     clear: Optional[bool] = True
-    # ) -> Tuple[int, np.ndarray, np.ndarray]:
-    #     """
-    #     Return a list of states and controls (None for geometric planners)
-    #     """
-    #     # Clear previous planning data and set new start state
-    #     if clear:
-    #         self.ss.clear()
-    #     start = self.get_StartState(start)
-    #     self.ss.setStartState(start)        
-        
-    #     status = self.ss.solve(solveTime)
-    #     t = self.ss.getLastPlanComputationTime()
-        
-    #     if self.timeLimit is not None:
-    #         while not self.ss.haveExactSolutionPath() and t < self.timeLimit:
-    #             print(f"\t{t:.1f}/{self.timeLimit:.1f}", end="\r") 
-    #             status = self.ss.solve(1.0)
-    #             t += self.ss.getLastPlanComputationTime()
-                 
-    #     msg = planner_utils.color_status(status)
-    #     if bool(status):
-    #         # Retrieve path
-    #         geometricPath = self.ss.getSolutionPath()
-    #         print(
-    #             f"{msg}: "
-    #             f"Path length is {geometricPath.length():.2f}, "
-    #             f"cost is {geometricPath.cost(self.objective).value():.2f}, ",
-    #             f"solve time is {t:.2f}"
-    #         )
-    #         states = planner_utils.path_to_numpy(geometricPath, dim=4)
-    #         return planner_utils.PlannerStatus[status.asString()], states, None
-    #     else:
-    #         print(status.asString())
-    #         raise ValueError("OMPL is not able to solve under current cost function")
-
-    def plan_exact_solution(
+    def plan(
         self, 
-        start: np.ndarray
+        start: np.ndarray, 
+        solveTime: Optional[float] = 6.0
     ) -> Tuple[int, np.ndarray, np.ndarray]:
-        """Plan until an exact solution is found"""
+        """
+        Return a list of states and controls (None for geometric planners)
+        """
         # Clear previous planning data and set new start state
         self.ss.clear()
         start = self.get_StartState(start)
-        self.ss.setStartState(start) 
-
-        termination_condition = ob.PlannerStatus.EXACT_SOLUTION 
-
-        status = self.ss.solve(termination_condition)
+        self.ss.setStartState(start)        
+        
+        status = self.ss.solve(solveTime)
         t = self.ss.getLastPlanComputationTime()
-
+        
+        # if self.timeLimit is not None:
+        #     while not self.ss.haveExactSolutionPath() and t < self.timeLimit:
+        #         print(f"\t{t:.1f}/{self.timeLimit:.1f}", end="\r") 
+        #         status = self.ss.solve(1.0)
+        #         t += self.ss.getLastPlanComputationTime()
+                 
         msg = planner_utils.color_status(status)
         if bool(status):
             # Retrieve path
@@ -107,6 +74,41 @@ class Maze2DGeometricPlanner(Maze2DBasePlanner):
             print(status.asString())
             raise ValueError("OMPL is not able to solve under current cost function")
 
+    # def plan_exact_solution(
+    #     self, 
+    #     start: np.ndarray
+    # ) -> Tuple[int, np.ndarray, np.ndarray]:
+    #     """Plan until an exact solution is found
+    #     This function does not work as expected. 
+    #     ob.exactSolnPlannerTerminationCondition does not work for most planners.
+    #     See https://github.com/ompl/ompl/issues/708."""
+    #     # Clear previous planning data and set new start state
+    #     self.ss.clear()
+    #     start = self.get_StartState(start)
+    #     self.ss.setStartState(start) 
+
+    #     termination_condition = ob.exactSolnPlannerTerminationCondition(
+    #         self.ss.getProblemDefinition()
+    #     )
+
+    #     status = self.ss.solve(termination_condition)
+    #     t = self.ss.getLastPlanComputationTime()
+
+    #     msg = planner_utils.color_status(status)
+    #     if bool(status):
+    #         # Retrieve path
+    #         geometricPath = self.ss.getSolutionPath()
+    #         print(
+    #             f"{msg}: "
+    #             f"Path length is {geometricPath.length():.2f}, "
+    #             f"cost is {geometricPath.cost(self.objective).value():.2f}, ",
+    #             f"solve time is {t:.2f}"
+    #         )
+    #         states = planner_utils.path_to_numpy(geometricPath, dim=4)
+    #         return planner_utils.PlannerStatus[status.asString()], states, None
+    #     else:
+    #         print(status.asString())
+    #         raise ValueError("OMPL is not able to solve under current cost function")
 
 
 
@@ -188,13 +190,13 @@ class AntMazeGeometricPlanner(AntMazeBasePlanner):
         self.ss.setGoal(goal)
 
         # Define optimization objective
-        objective = planner_utils.AntMazeShortestDistanceObjective(self.si)
-        self.ss.setOptimizationObjective(objective)
+        self.objective = planner_utils.AntMazeShortestDistanceObjective(self.si)
+        self.ss.setOptimizationObjective(self.objective)
 
     def plan(
         self, 
         start: np.ndarray, 
-        solveTime: Optional[float] = 15.0
+        solveTime: Optional[float] = 10.0
     ) -> Tuple[int, np.ndarray, np.ndarray]:
         """
         Return a list of states and controls (None for geometric planners)
@@ -205,10 +207,18 @@ class AntMazeGeometricPlanner(AntMazeBasePlanner):
         self.ss.setStartState(start)
 
         status = self.ss.solve(solveTime)
-        print(status.asString())
+        t = self.ss.getLastPlanComputationTime()
+
+        msg = planner_utils.color_status(status)
         if bool(status):
             # Retrieve path
             geometricPath = self.ss.getSolutionPath()
+            print(
+                f"{msg}: "
+                f"Path length is {geometricPath.length():.2f}, "
+                f"cost is {geometricPath.cost(self.objective).value():.2f}, ",
+                f"solve time is {t:.2f}"
+            )
             states = planner_utils.path_to_numpy(geometricPath, dim=29)
             return planner_utils.PlannerStatus[status.asString()], states, None
         else:

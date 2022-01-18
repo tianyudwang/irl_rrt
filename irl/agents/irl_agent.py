@@ -6,14 +6,15 @@ from stable_baselines3 import SAC
 from stable_baselines3.common.logger import configure
 
 from irl.agents.base_agent import BaseAgent
-from irl.planners.geometric_planner import (
-    Maze2DRRTstarPlanner, 
-    Maze2DPRMstarPlanner
-)
-from irl.planners.control_planner import (
-    Maze2DSSTPlanner,
-    Maze2DRRTPlanner
-)
+# from irl.planners.geometric_planner import (
+#     Maze2DRRTstarPlanner, 
+#     Maze2DPRMstarPlanner
+# )
+from irl.planners.geometric_planner import AntMazeRRTstarPlanner
+# from irl.planners.control_planner import (
+#     Maze2DSSTPlanner,
+#     Maze2DRRTPlanner
+# )
 from irl.rewards.mlp_reward import MLPReward
 from irl.utils import utils, types, wrappers, replay_buffer
 import irl.utils.pytorch_util as ptu
@@ -57,17 +58,21 @@ class IRLAgent(BaseAgent):
 
         # set up planner
         # TODO: Timelimit implement for Maze2DGeormetricPlanner
+        # if plannerType.lower() == 'rrtstar':
+        #     self.planner = Maze2DRRTstarPlanner(timeLimit)
+        # elif plannerType.lower() == 'prmstar':
+        #     self.planner = Maze2DPRMstarPlanner(timeLimit)
+        # elif plannerType.lower() == 'sst':
+        #     self.planner = Maze2DSSTPlanner(self.env.unwrapped)
+        # elif plannerType.lower() == 'rrt':
+        #     self.planner = Maze2DRRTPlanner(self.env.unwrapped)
+        # else:
+        #     raise ValueError(f"{plannerType} not supported")
+        
         if plannerType.lower() == 'rrtstar':
-            self.planner = Maze2DRRTstarPlanner(timeLimit)
-        elif plannerType.lower() == 'prmstar':
-            self.planner = Maze2DPRMstarPlanner(timeLimit)
-        elif plannerType.lower() == 'sst':
-            self.planner = Maze2DSSTPlanner(self.env.unwrapped)
-        elif plannerType.lower() == 'rrt':
-            self.planner = Maze2DRRTPlanner(self.env.unwrapped)
+            self.planner = AntMazeRRTstarPlanner()
         else:
             raise ValueError(f"{plannerType} not supported")
-        
         flag = "control" if plannerType.lower() in ["rrt", "sst"] else "geometric"
         print(f"Initializing {flag} based {plannerType.upper()} planner...")
         # Replay buffer to hold demo transitions
@@ -94,7 +99,7 @@ class IRLAgent(BaseAgent):
             action = demo_transitions[i].action
             next_state = demo_transitions[i].next_state
 
-            status, path, controls = self.planner.plan_exact_solution(next_state)
+            status, path, controls = self.planner.plan(next_state)
             
             path = np.concatenate((state.reshape(1, self.state_dim), path), axis=0)
             demo_paths.append([path])
@@ -109,7 +114,7 @@ class IRLAgent(BaseAgent):
                 agent_next_state = self.env.one_step_transition(state, agent_action)
 
                 # Find optimal path from s' to goal
-                status, path, controls = self.planner.plan_exact_solution(agent_next_state)
+                status, path, controls = self.planner.plan(agent_next_state)
                 if path is None:
                     import sys
                     import pickle

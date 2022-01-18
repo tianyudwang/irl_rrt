@@ -123,8 +123,8 @@ class Maze2DControlPlanner(Maze2DBasePlanner):
         self.ss.setGoal(goal)
 
         # Define optimization objective
-        objective = planner_utils.Maze2DShortestDistanceObjective(self.si)
-        self.ss.setOptimizationObjective(objective)
+        self.objective = planner_utils.Maze2DShortestDistanceObjective(self.si)
+        self.ss.setOptimizationObjective(self.objective)
 
     def get_ControlSpace(self, space: ob.StateSpace) -> oc.ControlSpace:
         """
@@ -168,17 +168,58 @@ class Maze2DControlPlanner(Maze2DBasePlanner):
 
         status = self.ss.solve(solveTime)
 
+        t = self.ss.getLastPlanComputationTime()
+        msg = planner_utils.color_status(status)
         if bool(status):
             # Retrieve path and controls
             control_path = self.ss.getSolutionPath()
             geometric_path = control_path.asGeometric()
             controls = control_path.getControls()
-
+            print(
+                f"{msg}: "
+                f"Path length is {geometric_path.length():.2f}, "
+                f"cost is {geometric_path.cost(self.objective).value():.2f}, ",
+                f"solve time is {t:.2f}"
+            )
             # Convert to numpy arrays
             states = planner_utils.path_to_numpy(geometric_path, dim=4)
             controls = planner_utils.controls_to_numpy(controls, dim=2)
             return planner_utils.PlannerStatus[status.asString()], states, controls
         else:
+            raise ValueError("OMPL is not able to solve under current cost function")
+
+    def plan_exact_solution(
+        self, 
+        start: np.ndarray
+    ) -> Tuple[int, np.ndarray, np.ndarray]:
+        """Plan until an exact solution is found"""
+        # Clear previous planning data and set new start state
+        self.ss.clear()
+        start = self.get_StartState(start)
+        self.ss.setStartState(start) 
+
+        termination_condition = ob.PlannerStatus.EXACT_SOLUTION 
+
+        status = self.ss.solve(termination_condition)
+        t = self.ss.getLastPlanComputationTime()
+
+        msg = planner_utils.color_status(status)
+        if bool(status):
+            # Retrieve path
+            control_path = self.ss.getSolutionPath()
+            geometric_path = control_path.asGeometric()
+            controls = control_path.getControls()
+            print(
+                f"{msg}: "
+                f"Path length is {geometric_path.length():.2f}, "
+                f"cost is {geometric_path.cost(self.objective).value():.2f}, ",
+                f"solve time is {t:.2f}"
+            )
+            states = planner_utils.path_to_numpy(geometric_path, dim=4)
+            controls = planner_utils.controls_to_numpy(controls, dim=2)
+            return planner_utils.PlannerStatus[status.asString()], states, controls
+        else:
+            print(status.asString())
             raise ValueError("OMPL is not able to solve under current cost function")
 
 
@@ -195,7 +236,7 @@ class Maze2DRRTPlanner(Maze2DControlPlanner):
         super().__init__(env)
 
         planner = oc.RRT(self.si)
-        #TODO: check planner selection/pruning radius
+        #TODO: check planner nearest neighbor
         self.ss.setPlanner(planner)
 
 

@@ -10,6 +10,38 @@ import time
 
 from irl.planners.geometric_planner import AntMazeRRTstarPlanner
 # from irl.planners.control_planner import AntMazeSSTPlanner, AntMazeKPIECEPlanner
+from irl.utils import wrappers
+
+def test_antmaze_wrappers():
+    """
+    Test one step transition function 
+    """
+    env_name = "antmaze-umaze-v1"
+    env = gym.make(env_name)
+
+    env = wrappers.AntMazeFixedGoalWrapper(env)
+    env = wrappers.AntMazeFixedStartWrapper(env)
+    env = wrappers.AntMazeTransitionWrapper(env)
+
+    state = env.reset()
+    path_1, actions = [state], []
+
+    for i in range(10):
+        action = env.action_space.sample()
+        state, _, _, _ = env.step(action)
+        path_1.append(state)
+        actions.append(action) 
+
+
+    state = env.reset()
+    path_2 = [state]
+    for action in actions:
+        state = env.one_step_transition(state, action)
+        path_2.append(state)
+
+    for state_1, state_2 in zip(path_1, path_2):
+        assert np.allclose(state_1, state_2)
+
 
 def test_feasible_region():
     """
@@ -95,7 +127,8 @@ def test_antmaze_RRTstar_planner():
 
 
 
-# if __name__ == '__main__':
+if __name__ == '__main__':
+    test_antmaze_wrappers()
     # test_feasible_region()
     # test_antmaze_RRTstar_planner()
     # test_antmaze_SST_planner()

@@ -27,6 +27,8 @@ try:
 except ImportError:  # Graceful fallback if IceCream isn't installed.
     ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)  # noqa
 
+np.set_printoptions(formatter={'float': lambda x: "{0:0.3f}".format(x)})
+
 # how many rollouts to save as videos to tensorboard
 MAX_NVIDEO = 2
 MAX_VIDEO_LEN = 40  # we overwrite this in the code below
@@ -133,6 +135,13 @@ class Trainer:
             
         elif self.params["env_name"] == "antmaze-umaze-v1":
             env = gym.make(self.params["env_name"])
+            env = wrappers.AntMazeFixedGoalWrapper(env)
+            env = wrappers.AntMazeFixedStartWrapper(env)
+            env = wrappers.AntMazeTransitionWrapper(env)
+            env = wrappers.AntMazeFirstExitWrapper(env)
+            self.env = env
+
+            self.eval_env = env
         else:
             raise ValueError(f"Environment {self.params['env_name']} is not supported")
 
@@ -306,7 +315,6 @@ class Trainer:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env_name", type=str, default="maze2d-umaze-v1")
-    parser.add_argument("--exp_name", type=str, default="maze2d-umaze-v1")
     parser.add_argument("--expert_filename", type=str, default="maze2d-umaze-v1.hdf5")
     parser.add_argument("--timeLimit", type=float, default=2)
     

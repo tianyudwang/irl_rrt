@@ -79,25 +79,11 @@ def test_maze2d_RRTstar_planner():
     for _ in range(10):
         obs = env.reset()
         status, states, controls = planner.plan(start=obs)
-        assert np.linalg.norm([states[-1][0] - goal[0], states[-1][1] - goal[1]]) <= 0.1
+        assert np.linalg.norm([states[-1][0] - goal[0], states[-1][1] - goal[1]]) <= 0.1, (
+            f"Last state {states[-1]} does not reach goal at {goal}"
+        )
 
         # planner_utils.visualize_path(states, goal, save=True)
-
-def test_maze2d_RRTstar_exact_solution():
-    """
-    Plan with termination condition set to exact solution
-    """
-    env_name = "maze2d-umaze-v1"
-    env = gym.make(env_name)
-    env = Maze2DFixedStartWrapper(env)
-    goal = np.array([1., 1.])
-
-    planner = Maze2DRRTstarPlanner()
-    for _ in range(10):
-        obs = env.reset()
-        status, states, controls = planner.plan_exact_solution(start=obs)
-        assert np.linalg.norm([states[-1][0] - goal[0], states[-1][1] - goal[1]]) <= 0.1
-
 
 def test_maze2d_PRMstar_planner():
     """
@@ -157,7 +143,8 @@ def test_maze2d_SST_planner():
     planner = Maze2DSSTPlanner(env.unwrapped)
     for _ in range(10):
         obs = env.reset()
-        status, states, controls = planner.plan(start=obs, solveTime=20)
+        print(obs)
+        status, states, controls = planner.plan(start=obs, solveTime=15)
 
         # planner_utils.visualize_path(states, goal, save=True)
 
@@ -205,9 +192,9 @@ def test_maze2d_RRT_planner():
         assert np.linalg.norm(rollout_states - states) < 0.1
 
 if __name__ == '__main__':
-#     test_feasible_region()
+    # test_feasible_region()
     # test_maze2d_RRTstar_planner()
-    # test_maze2d_RRTstar_exact_solution()
-    test_maze2d_PRMstar_multiple_queries()
-#     test_maze2d_PRMstar_planner()
-#     test_maze2d_RRT_planner()
+    # test_maze2d_PRMstar_multiple_queries()
+    test_maze2d_PRMstar_planner()
+    # test_maze2d_RRT_planner()
+    # test_maze2d_SST_planner()

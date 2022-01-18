@@ -40,6 +40,40 @@ class Maze2DIRLObjective(ob.OptimizationObjective):
         data[2] = state[1][0]
         data[3] = state[1][1]
 
+class AntMazeIRLObjective(ob.OptimizationObjective):
+    def __init__(self, si, cost_fn):
+        super().__init__(si)
+        self.cost_fn = cost_fn
+
+        self.s1_data = np.empty(29, dtype=np.float32)
+        self.s2_data = np.empty(29, dtype=np.float32)
+
+    def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
+        """Query the neural network cost function for a cost between two states"""
+        self.cp_state_to_data(s1, self.s1_data)
+        self.cp_state_to_data(s2, self.s2_data)
+
+        c = self.cost_fn(self.s1_data, self.s2_data)
+        return ob.Cost(c)
+
+    def cp_state_to_data(self, state: ob.State, data: np.ndarray):
+        # ob.State is a CompoundState of an SE3State and 2 RealVectorState's       
+        # SE3
+        data[0] = state[0].getX()
+        data[1] = state[0].getY()
+        data[2] = state[0].getZ()
+        data[3] = state[0].rotation().x
+        data[4] = state[0].rotation().y
+        data[5] = state[0].rotation().z
+        data[6] = state[0].rotation().w
+
+        # 8 joints
+        for i in range(8):
+            data[7+i] = state[1][i]
+        # 14 velocities
+        for i in range(14):
+            data[15+i] = state[2][i]
+
 
 class MinimumTransitionObjective(ob.PathLengthOptimizationObjective):
     """Minimum number of transitions"""

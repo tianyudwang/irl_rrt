@@ -18,7 +18,7 @@ class Maze2DGoalState(ob.GoalState):
         self, 
         si: ob.SpaceInformation, 
         goal: Optional[np.ndarray] = np.array([1., 1.]), 
-        threshold: Optional[float] = 0.5
+        threshold: Optional[float] = 0.1
     ):
         super().__init__(si)
         assert len(goal.shape) == 1 and goal.shape[0] == 2
@@ -272,10 +272,12 @@ class AntMazeStateValidityChecker(ob.StateValidityChecker):
         # start state has type ob.State which is ob::ScopedState in c++
         # sampled state has type ob.CompoundStateInternal
         if isinstance(state, ob.CompoundStateInternal):
-            x, y = state[0].getX(), state[0].getY()
             if not self.si.satisfiesBounds(state):
                 return False
+            x, y = state[0].getX(), state[0].getY()
         elif isinstance(state, ob.State):
+            if not self.si.satisfiesBounds(state()):
+                return False
             x, y = state[0], state[1]
         else:
             raise ValueError(f"Check state type {type(state)}")
@@ -386,10 +388,20 @@ class AntMazeBasePlanner:
         start_state = ob.State(self.space)
 
         for i in range(len(start)):
-            start_state[i] = start[i]
+            start_state[i] = start[i].item()
+        
+        # Sometimes si says start state is not in bounds even though it is...
+        if not self.si.satisfiesBounds(start_state()):
+            self.si.enforceBounds(start_state())
+            print(f"\nEnforcing start state {start} to be within bounds ...")
 
         assert self.state_validity_checker.isValid(start_state), (
             f"Start state {start} is not valid"
         )        
 
         return start_state
+
+    def update_ss_cost(self, cost_fn):
+        # Set up cost function
+        costObjective = planner_utils.AntMazeIRLObjective(self.si, cost_fn)
+        self.ss.setOptimizationObjective(costObjective)

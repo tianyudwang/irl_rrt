@@ -156,28 +156,85 @@ def render_trajectory(env, qpos, qvel):
         env.set_state(qpos[i], qvel[i])
         env.render()
 
+# def check_valid(dataset):
+#     observations = dataset['observations']
+#     actions = dataset['actions']
+
+#     state_low = np.array([0.5, 0.5, -5., -5.])
+#     state_high = np.array([3.5, 3.5, 5., 5.])
+
+#     size = 0.1
+#     # Square extents
+#     square_x_min = 0.5 + size
+#     square_x_max = 3.5 - size
+#     square_y_min = 0.5 + size
+#     square_y_max = 3.5 - size
+
+#     # Rectangle extents
+#     rect_x_min = 1.5 - size
+#     rect_x_max = 2.5 + size
+#     rect_y_min = 0.5 + size
+#     rect_y_max = 2.5 + size
+
+#     action_low = np.array([-1, -1])
+#     action_high = np.array([1, 1])
+
+#     for state in observations:
+#         assert (state_low <= state).all() and (state <= state_high).all(), (
+#             f"State {state} not in bounds"
+#         )
+
+#         in_square = ((square_x_min <= state[0] <= square_x_max) 
+#             and (square_y_min <= state[1] <= square_y_max))
+#         assert in_square, (
+#             f"State {state} not in square"
+#         )
+
+#         in_rect = ((rect_x_min <= state[0] <= rect_x_max) 
+#             and (rect_y_min <= state[1] <= rect_y_max))
+#         assert not in_rect, (
+#             f"State {state} in rectangle"
+#         )
+
+#     for action in actions:
+#         assert (action_low <= action).all() and (action <= action_high).all(), (
+#             f"Action {action} not in bounds")
+
 def check_valid(dataset):
     observations = dataset['observations']
     actions = dataset['actions']
 
-    state_low = np.array([0.5, 0.5, -5., -5.])
-    state_high = np.array([3.5, 3.5, 5., 5.])
+    R3_low = np.array([-2., -2., 0.])
+    R3_high = np.array([10., 10., 1.6])
 
-    size = 0.1
+    quaternion_low = np.array([-1., -1., -1., -1.])
+    quaternion_high = np.array([1., 1., 1., 1.])
+
+    joints_low = -1.5 * np.ones(8)
+    joints_high = 1.5 * np.ones(8)
+
+    qvel_low = -10. * np.ones(14)
+    qvel_high = 10. * np.ones(14)
+
+    state_low = np.concatenate((R3_low, quaternion_low, joints_low, qvel_low))
+    state_high = np.concatenate((R3_high, quaternion_high, joints_high, qvel_high))
+
+
+    size = 0.25
     # Square extents
-    square_x_min = 0.5 + size
-    square_x_max = 3.5 - size
-    square_y_min = 0.5 + size
-    square_y_max = 3.5 - size
+    square_x_min = -2 + size
+    square_x_max = 10 - size
+    square_y_min = -2 + size
+    square_y_max = 10 - size
 
     # Rectangle extents
-    rect_x_min = 1.5 - size
-    rect_x_max = 2.5 + size
-    rect_y_min = 0.5 + size
-    rect_y_max = 2.5 + size
+    rect_x_min = -2 + size
+    rect_x_max = 6 + size
+    rect_y_min = 2 - size
+    rect_y_max = 6 + size
 
-    action_low = np.array([-1, -1])
-    action_high = np.array([1, 1])
+    action_low = -1 * np.ones(8)
+    action_high = 1 * np.ones(8)
 
     for state in observations:
         assert (state_low <= state).all() and (state <= state_high).all(), (
