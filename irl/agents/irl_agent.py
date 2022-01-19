@@ -9,10 +9,10 @@ from irl.rewards.reward_net import RewardNet
 from irl.planners.sst_planner import SSTPlanner
 from irl.planners.planner import Planner
 
-import irl.util.pytorch_util as ptu 
-import irl.util.utils as utils
-from irl.util.wrappers import IRLEnv
-from irl.util.replay_buffer import ReplayBuffer
+import irl.utils.pytorch_util as ptu 
+import irl.utils.utils as utils
+from irl.utils.wrappers import IRLEnv
+from irl.utils.replay_buffer import ReplayBuffer
 
 
 class IRL_Agent(BaseAgent):
@@ -86,9 +86,9 @@ class IRL_Agent(BaseAgent):
             agent_paths.append(paths)
             agent_log_probs.append(log_probs)
 
-        # demo_paths = self.collate_fn(demo_paths)
-        # agent_paths = self.collate_fn(agent_paths)
-        # agent_log_probs = np.array(agent_log_probs)
+        demo_paths = self.collate_fn(demo_paths)
+        agent_paths = self.collate_fn(agent_paths)
+        agent_log_probs = np.array(agent_log_probs)
 
         reward_logs = []
         for step in range(self.agent_params['reward_updates_per_iter']):

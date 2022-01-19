@@ -5,7 +5,7 @@ import gym
 import numpy as np
 
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
-import irl.util.pytorch_util as ptu
+import irl.utils.pytorch_util as ptu
 
 ############################################
 ############################################
@@ -97,8 +97,10 @@ def sample_trajectories(
 
 def check_demo_performance(paths):
     returns = [path['reward'].sum() for path in paths]
+    lens = [len(path['action']) for path in paths]
     print(f"Collected {len(returns)} expert demonstrations")
-    print(f"Demonstration return {np.mean(returns):.2f} +/ {np.std(returns):.2f}")
+    print(f"Demonstration length {np.mean(lens):.2f} +/- {np.std(lens):.2f}")
+    print(f"Demonstration return {np.mean(returns):.2f} +/- {np.std(returns):.2f}")
 
 # def pad_absorbing_states(paths, horizon=100):
 #     """

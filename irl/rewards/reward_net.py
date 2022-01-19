@@ -6,7 +6,7 @@ import torch as th
 from torch import nn
 from torch import optim
 
-import irl.util.pytorch_util as ptu
+import irl.utils.pytorch_util as ptu
 
 class RewardNet(nn.Module):
     """

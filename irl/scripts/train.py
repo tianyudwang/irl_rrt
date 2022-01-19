@@ -9,10 +9,10 @@ import numpy as np
 import torch 
 
 from irl.agents.irl_agent import IRL_Agent
-import irl.util.pytorch_util as ptu 
-import irl.util.utils as utils
-from irl.util.logger import Logger
-from irl.util.wrappers import PendulumWrapper
+import irl.utils.pytorch_util as ptu 
+import irl.utils.utils as utils
+from irl.utils.logger import Logger
+from irl.utils.wrappers import PendulumWrapper
 
 
 # how many rollouts to save as videos to tensorboard
@@ -74,11 +74,13 @@ class Trainer():
 
     def init_env(self):
         """Load environment with fixed random seed"""
-        assert self.params['env_name'] == 'Pendulum-v0', f"Environment {self.params['env_name']} not supported yet."
+        assert self.params['env_name'] == 'Pendulum-v1', (
+            f"Environment {self.params['env_name']} not supported yet."
+        )
         seed = self.params['seed']
         rng = np.random.RandomState(seed)
         env_seed = rng.randint(0, (1 << 31) - 1)
-        self.env = PendulumWrapper(gym.make("Pendulum-v0"))
+        self.env = PendulumWrapper(gym.make(self.params['env_name']))
         print(env_seed)
         self.env.seed(int(env_seed))
 
@@ -256,9 +258,8 @@ class Trainer():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str, default='Pendulum-v0')
-    parser.add_argument('--exp_name', type=str, default='Pendulum-v0')
-    parser.add_argument('--expert_policy', type=str, default='SAC_Pendulum-v0')        
+    parser.add_argument('--env_name', type=str, default='Pendulum-v1')
+    parser.add_argument('--expert_policy', type=str, default='SAC_Pendulum-v1')        
     parser.add_argument(
         '--n_iter', '-n', type=int, default=100,
         help='Number of total iterations')
