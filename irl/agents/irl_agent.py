@@ -6,8 +6,8 @@ from stable_baselines3 import SAC
 
 from irl.agents.base_agent import BaseAgent 
 from irl.rewards.reward_net import RewardNet
-from irl.planners.sst_planner import SSTPlanner
-from irl.planners.planner import Planner
+from irl.planners.control_planner import PendulumSSTPlanner
+# from irl.planners.planner import Planner
 
 import irl.utils.pytorch_util as ptu 
 import irl.utils.utils as utils
@@ -38,7 +38,7 @@ class IRL_Agent(BaseAgent):
 
         self.state_dim = self.agent_params['ob_dim']
 
-        self.planner = SSTPlanner()
+        self.planner = PendulumSSTPlanner()
         # self.planner = Planner()
 
         # Replay buffer to hold demo transitions (maximum transitions)
@@ -49,11 +49,11 @@ class IRL_Agent(BaseAgent):
         print('\nTraining agent reward function...')
         demo_transitions = self.sample_transitions(self.agent_params['transitions_per_reward_update'])
 
-        # Update OMPL SimpleSetup object cost function with current learned reward
-        self.planner.update_ss_cost(self.reward.cost_fn)
-
         # Synchronize reward net weights on cpu and cuda 
         self.reward.copy_model_to_cpu()
+        # Update OMPL SimpleSetup object cost function with current learned reward
+        self.reward.model_cpu.eval()
+        self.planner.update_ss_cost(self.reward.cost_fn)
 
         demo_paths = []
         agent_paths = []
@@ -64,7 +64,7 @@ class IRL_Agent(BaseAgent):
             # and find optimal path from s' to goal
             print(f"Planning trajectory {i+1}/{self.agent_params['transitions_per_reward_update']} from expert state ...")
             ob, ac, log_probs, rewards, next_ob, done = [var[i] for var in demo_transitions]
-            path, controls = self.planner.plan(next_ob)
+            status, path, controls = self.planner.plan(next_ob)
             path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
             demo_paths.append([path])
             
@@ -79,7 +79,7 @@ class IRL_Agent(BaseAgent):
                 agent_next_ob = self.env.one_step_transition(ob, agent_ac)
                 
                 # Find optimal path from s' to goal
-                path, controls = self.planner.plan(agent_next_ob)
+                status, path, controls = self.planner.plan(agent_next_ob)
                 path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
                 paths.append(path)
                 log_probs.append(log_prob)
@@ -183,7 +183,7 @@ class IRL_Agent(BaseAgent):
         Train the policy/actor using learned reward
         """
         print('\nTraining agent policy...')
-        self.actor.learn(total_timesteps=1000, log_interval=5)
+        self.actor.learn(total_timesteps=10000, log_interval=5)
         train_log = {'Policy loss': 0}
         return train_log
 
@@ -209,6 +209,3 @@ class IRL_Agent(BaseAgent):
         """
         return self.demo_buffer.sample_random_data(batch_size)
 
-    ######################################################
-    def save_reward_model(self, filename: str) -> None:
-        self.reward.save_model(filename)

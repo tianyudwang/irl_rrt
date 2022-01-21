@@ -151,7 +151,7 @@ class RewardNet(nn.Module):
         self.optimizer.step()
         train_reward_log = {"Reward_loss": ptu.to_numpy(loss)}
 
-        print("Reward training loss:", loss.item())
+        print(f"Reward training loss: {loss.item():.2f}")
         return train_reward_log
 
 
@@ -182,5 +182,5 @@ class RewardNet(nn.Module):
         th.save(self.model.state_dict(), PATH)
         self.model_cpu.load_state_dict(th.load(PATH, map_location=self.device_cpu))
 
-    def save_model(self, filename: str) -> None:
+    def save(self, filename: str) -> None:
         th.save(self.model.state_dict(), filename)

@@ -1,29 +1,124 @@
-from functools import partial
+from typing import Optional
 
 import numpy as np
 
 from ompl import util as ou
 from ompl import base as ob
-from ompl import geometric as og
-from ompl import control as oc
-
-## Defines an optimization objective by computing the cost of motion between 
-# two endpoints.
-class IRLCostObjective(ob.OptimizationObjective):
-    def __init__(self, si, cost_fn):
-        super(IRLCostObjective, self).__init__(si)
-        self.cost_fn = cost_fn
-    
-    def motionCost(self, s1, s2):
-        s1 = np.array([s1[0].value, s1[1][0]])
-        s2 = np.array([s2[0].value, s2[1][0]])
-        c = self.cost_fn(s1, s2)
-        return ob.Cost(c)
-
-def getIRLCostObjective(si, cost_fn):
-    return IRLCostObjective(si, cost_fn)
 
 
+from irl.utils import planner_utils
+
+
+class PendulumGoalState(ob.GoalState):
+    """
+    Defines a goal region around goal state with threshold 
+    In Pendulum-v1, the goal state is [0, 0]
+    """
+    def __init__(
+        self, 
+        si: ob.SpaceInformation, 
+        goal: Optional[np.ndarray] = np.array([0., 0.]), 
+        threshold: Optional[float] = 0.1
+    ):
+        super().__init__(si)
+        assert len(goal.shape) == 1 and goal.shape[0] == 2
+        self.goal = goal.tolist()
+        self.setThreshold(threshold)
+
+    def distanceGoal(self, state: ob.State) -> float:
+        """Computes the distance from state to goal"""
+        dx = state[0].value - self.goal[0]
+        dy = state[1][0] - self.goal[1]
+        return np.linalg.norm([dx, dy])
+
+    def sampleGoal(self, state: ob.State) -> None:
+        state[0].value = self.goal[0]
+        state[1][0] = self.goal[1]
+
+
+class PendulumStateValidityChecker(ob.StateValidityChecker):
+    """
+    Checks whether a given state is a valid/feasible state in Pendulum-v1
+    State is [theta, theta_dot]
+    Only need to check bounds since there are no obstacles in state space
+    """
+    def __init__(self, si: ob.SpaceInformation):
+        super().__init__(si)
+        self.si = si
+
+    def isValid(self, state: ob.State) -> bool:
+        if isinstance(state, ob.CompoundStateInternal):
+            return self.si.satisfiesBounds(state)
+
+        # Start state has type ob.ScopedState, need to get internal state
+        elif isinstance(state, ob.State):
+            return self.si.satisfiesBounds(state())
+
+        else:
+            raise ValueError(f"state type {type(state)} not recognized")
+
+class PendulumBasePlanner:
+    """
+    Initialize StateSpace, StateValidityChecker, and ProblemDefinition
+    To be inherited by specific geometric/control planners
+    """
+
+    def __init__(self):
+        ou.setLogLevel(ou.LogLevel.LOG_WARN)
+
+    def get_StateSpace(self) -> ob.StateSpace:
+        """
+        Create the state space for Pendulum-v1
+        State includes [theta, theta_dot]
+        """
+        # Construct [theta, theta_dot] state space
+        # SO2 state space enforces angle to be in [-pi, pi]
+        state_high = np.array([np.pi, 8], dtype=np.float64)
+        th_space = ob.SO2StateSpace()
+        th_dot_space = ob.RealVectorStateSpace(1)
+        th_dot_bounds = ob.RealVectorBounds(1)
+        th_dot_bounds.setLow(-state_high[1])
+        th_dot_bounds.setHigh(state_high[1])
+        th_dot_space.setBounds(th_dot_bounds)
+
+        # Create compound space which allows the composition of state spaces.
+        space = ob.CompoundStateSpace()
+        space.addSubspace(th_space, 1.0)
+        space.addSubspace(th_dot_space, 1.0)
+        
+        # Lock the compound state space        
+        space.lock()
+        space.sanityChecks()
+
+        return space
+
+    def get_StateValidityChecker(self, si: ob.SpaceInformation) -> ob.StateValidityChecker:
+        return PendulumStateValidityChecker(si)
+
+    def get_Goal(self, si: ob.SpaceInformation) -> ob.Goal:
+        return PendulumGoalState(si)
+
+    def get_StartState(self, start: np.ndarray) -> ob.State:
+        if isinstance(start, np.ndarray):
+            assert start.ndim == 1
+        start_state = ob.State(self.space)
+        for i in range(len(start)):
+            # * Copy an element of an array to a standard Python scalar
+            # * to ensure C++ can recognize it.
+            start_state[i] = start[i].item()
+
+        assert self.state_validity_checker.isValid(start_state), (
+            f"Start state {start} is not valid"
+        )        
+        return start_state
+
+    def update_ss_cost(self, cost_fn):
+        # Set up cost function
+        costObjective = planner_utils.PendulumIRLObjective(self.si, cost_fn)
+        self.ss.setOptimizationObjective(costObjective)
+
+
+#####################################################################
 class BasePlanner:
     def __init__(self):
         # Space information
@@ -141,17 +236,27 @@ class BasePlanner:
         start[0], start[1] = start_state[0].item(), start_state[1].item() 
         self.ss.setStartState(start)
 
-        # Solve and get optimal path
-#        while not self.ss.getProblemDefinition().hasExactSolution():
-#            solved = self.ss.solve(solveTime)
-        solved = self.ss.solve(5.0)
-        if solved:
+        status = self.ss.solve(solveTime)
+
+        t = self.ss.getLastPlanComputationTime()
+        msg = planner_utils.color_status(status)
+
+        objective = self.ss.getProblemDefinition().getOptimizationObjective()
+
+        if bool(status):    
             control_path = self.ss.getSolutionPath()
-            states = np.array([[state[0].value, state[1][0]] 
-                              for state in control_path.getStates()], dtype=np.float32)
-            controls = np.array([u[0] for u in control_path.getControls()], 
-                                dtype=np.float32)
-            return states, controls
+            geometric_path = control_path.asGeometric()
+            controls = control_path.getControls()
+            print(
+                f"{msg}: "
+                f"Path length is {geometric_path.length():.2f}, "
+                f"cost is {geometric_path.cost(objective).value():.2f}, ",
+                f"solve time is {t:.2f}"
+            )
+
+            # Convert to numpy arrays
+            states = planner_utils.path_to_numpy(geometric_path, dim=2)
+            controls = planner_utils.controls_to_numpy(controls, dim=1)
+            return planner_utils.PlannerStatus[status.asString()], states, controls
         else:
             raise ValueError("OMPL is not able to solve under current cost function")
-            return None, None
