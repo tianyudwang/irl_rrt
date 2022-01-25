@@ -1,5 +1,3 @@
-
-  
 import os
 os.environ['D4RL_SUPPRESS_IMPORT_ERROR'] = '1'
 import numpy as np
@@ -95,8 +93,8 @@ def main():
     parser.add_argument('--env', type=str, default='Ant', help='Environment type')
     parser.add_argument('--policy_file', type=str, default='policy_file', help='file_name')
     parser.add_argument('--num_trajectories', type=int, default=int(1e2), help='Number of trajectories to collect')
-    parser.add_argument('--render', action='store_true', help='record video')
-
+    parser.add_argument('--render', "-r", action='store_true', help='record video')
+    parser.add_argument("--timelimit", action='store_true', help="Turn each trajectory into fix horizon")
 
 
     args = parser.parse_args()
@@ -182,7 +180,9 @@ def main():
                 env.render()    
             
             is_success = distanceGoal(s[:2], env.target_goal) < 0.5  # goal threshold
-            done = is_success
+            
+            if not args.timelimit:
+                done = is_success
             
             if ts >= config["max_episode_steps"]:
                 timeout = True
@@ -203,10 +203,11 @@ def main():
     assert data["count"] == args.num_trajectories, "number of trajectories collected is not equal to num_trajectories"
     data.pop("count")
     
+    tl = "_timelimit" if args.timelimit else ""
     if args.noisy:
-        fname = args.env + f"_maze_umaze_noisy_fixstart_fixgoal.hdf5"
+        fname = args.env + f"_maze_umaze_noisy_fixstart_fixgoal{tl}.hdf5"
     else:
-        fname = args.env + f"maze_umaze_fixstart_fixgoal.hdf5" 
+        fname = args.env + f"maze_umaze_fixstart_fixgoal_{tl}.hdf5" 
     dataset = h5py.File(fname, 'w')
     npify(data)
     for k in data:
