@@ -6,15 +6,8 @@ from stable_baselines3 import SAC
 from stable_baselines3.common.logger import configure
 
 from irl.agents.base_agent import BaseAgent
-# from irl.planners.geometric_planner import (
-#     Maze2DRRTstarPlanner, 
-#     Maze2DPRMstarPlanner
-# )
-from irl.planners.geometric_planner import AntMazeRRTstarPlanner
-# from irl.planners.control_planner import (
-#     Maze2DSSTPlanner,
-#     Maze2DRRTPlanner
-# )
+import irl.planners.geometric_planner as gp
+import irl.planners.control_planner as cp
 from irl.rewards.mlp_reward import MLPReward
 from irl.utils import utils, types, wrappers, replay_buffer
 import irl.utils.pytorch_util as ptu
@@ -25,8 +18,6 @@ class IRLAgent(BaseAgent):
         self,
         env: gym.Env,
         agent_params: dict,
-        plannerType: str,
-        timeLimit: Optional[float] = None,
     ):
         super(IRLAgent, self).__init__()
 
@@ -35,14 +26,7 @@ class IRLAgent(BaseAgent):
         self.agent_params = agent_params
 
         # reward function
-        self.reward = MLPReward(
-            self.agent_params["ob_dim"],
-            self.agent_params["ac_dim"],
-            self.agent_params["n_layers"],
-            self.agent_params["size"],
-            self.agent_params["output_size"],
-            self.agent_params["learning_rate"],
-        )
+        self.reward = MLPReward(self.agent_params)
 
         # create a wrapper env with learned reward
         self.irl_env = wrappers.IRLWrapper(self.env, self.reward)
@@ -57,24 +41,28 @@ class IRLAgent(BaseAgent):
         self.state_dim = self.agent_params["ob_dim"]
 
         # set up planner
-        # TODO: Timelimit implement for Maze2DGeormetricPlanner
-        # if plannerType.lower() == 'rrtstar':
-        #     self.planner = Maze2DRRTstarPlanner(timeLimit)
-        # elif plannerType.lower() == 'prmstar':
-        #     self.planner = Maze2DPRMstarPlanner(timeLimit)
-        # elif plannerType.lower() == 'sst':
-        #     self.planner = Maze2DSSTPlanner(self.env.unwrapped)
-        # elif plannerType.lower() == 'rrt':
-        #     self.planner = Maze2DRRTPlanner(self.env.unwrapped)
-        # else:
-        #     raise ValueError(f"{plannerType} not supported")
-        
-        if plannerType.lower() == 'rrtstar':
-            self.planner = AntMazeRRTstarPlanner()
+        env_name, planner_type = agent_params['env_name'], agent_params['planner_type']
+        if env_name == 'maze2d-umaze-v1':
+            if planner_type.lower() == 'rrtstar':
+                self.planner = gp.Maze2DRRTstarPlanner()
+            elif planner_type.lower() == 'prmstar':
+                self.planner = gp.Maze2DPRMstarPlanner()
+            elif planner_type.lower() == 'sst':
+                self.planner = cp.Maze2DSSTPlanner(self.env.unwrapped)
+            elif planner_type.lower() == 'rrt':
+                self.planner = cp.Maze2DRRTPlanner(self.env.unwrapped)
+            else:
+                raise ValueError(f"{planner_type} not supported")
+        elif env_name == 'antmaze-umaze-v1':
+            if planner_type.lower() == 'rrtstar':
+                self.planner = gp.AntMazeRRTstarPlanner()
+            else:
+                raise ValueError(f"{planner_type} not supported")
         else:
-            raise ValueError(f"{plannerType} not supported")
-        flag = "control" if plannerType.lower() in ["rrt", "sst"] else "geometric"
-        print(f"Initializing {flag} based {plannerType.upper()} planner...")
+            raise ValueError(f"{env_name} not supported")
+
+        flag = "control" if planner_type.lower() in ["rrt", "sst"] else "geometric"
+        print(f"Initializing {flag} based {planner_type.upper()} planner...")
         # Replay buffer to hold demo transitions
         self.demo_buffer = replay_buffer.ReplayBuffer()
 
@@ -85,6 +73,9 @@ class IRLAgent(BaseAgent):
             self.agent_params["transitions_per_reward_update"]
         )
 
+        # Synchronize reward net weights from cuda to cpu
+        # cpu model is used to query cost during planning
+        self.reward.copy_model_to_cpu()
         # Update OMPL SimpleSetup object cost function with current learned reward
         self.planner.update_ss_cost(self.reward.cost_fn)
         

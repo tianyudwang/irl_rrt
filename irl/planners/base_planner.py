@@ -8,7 +8,7 @@ from ompl import util as ou
 import irl.planners.planner_utils as planner_utils
 
 
-class Maze2DGoalState(ob.GoalState):
+class Maze2DGoalState(ob.GoalSampleableRegion):
     """
     Defines a goal region around goal state with threshold 
     In umaze, the goal region is defined as the states whose distance to goal 
@@ -22,6 +22,7 @@ class Maze2DGoalState(ob.GoalState):
     ):
         super().__init__(si)
         assert len(goal.shape) == 1 and goal.shape[0] == 2
+        self.si = si
         self.goal = goal.tolist()
         self.setThreshold(threshold)
 
@@ -35,7 +36,13 @@ class Maze2DGoalState(ob.GoalState):
         state[0][0] = self.goal[0]
         state[0][1] = self.goal[1]
 
-        state[1][0], state[1][1] = 0., 0.
+        if not self.si.satisfiesBounds(state):
+            self.si.enforceBounds(state)
+        assert self.si.satisfiesBounds(state), "Sampled goal not in bounds"
+    
+    def maxSampleCount(self) -> int:
+        return 1
+
 
 class Maze2DStateValidityChecker(ob.StateValidityChecker):
     """
@@ -108,10 +115,9 @@ class Maze2DBasePlanner:
     Initialize StateSpace, StateValidityChecker, and ProblemDefinition
     To be inherited by specific geometric/control planners
     """
-    def __init__(self, timeLimit: Optional[float] = None):
-        ou.setLogLevel(ou.LogLevel.LOG_WARN)
-        # Time limit
-        self.timeLimit = timeLimit
+    def __init__(self):
+        ou.setLogLevel(ou.LogLevel.LOG_INFO)
+        # pass
 
     def get_StateSpace(self) -> ob.StateSpace:
         """
@@ -196,11 +202,12 @@ class Maze2DBasePlanner:
 #################################################################################
 #################################################################################
 
-class AntMazeGoalState(ob.GoalRegion):
+class AntMazeGoalState(ob.GoalSampleableRegion):
     """
     Defines a goal region around goal state with threshold 
     In umaze, the goal region is defined as the states whose distance to goal 
     is smaller than threshold=0.5 in x-y plane
+    Sampling the goal state will always return this state 
     """
     def __init__(
         self, 
@@ -210,6 +217,7 @@ class AntMazeGoalState(ob.GoalRegion):
     ):
         super().__init__(si)
         assert len(goal.shape) == 1 and goal.shape[0] == 2
+        self.si = si
         self.goal = goal.tolist()
         self.setThreshold(threshold)
 
@@ -219,11 +227,16 @@ class AntMazeGoalState(ob.GoalRegion):
         dy = state[0].getY() - self.goal[1]
         return np.linalg.norm([dx, dy])
 
-    # def sampleGoal(self, state: ob.State) -> None:
-    #     state[0].getX() = self.goal[0]
-    #     state[0].getY() = self.goal[1]
+    def sampleGoal(self, state: ob.State) -> None:
+        state[0][0][0] = self.goal[0]
+        state[0][0][1] = self.goal[1]
+        
+        if not self.si.satisfiesBounds(state):
+            self.si.enforceBounds(state)
+        assert self.si.satisfiesBounds(state), "Sampled goal not in bounds"
 
-        # TODO: Set other dimensions to zero
+    def maxSampleCount(self) -> int:
+        return 1
 
 class AntMazeStateValidityChecker(ob.StateValidityChecker):
     """
@@ -295,12 +308,14 @@ class AntMazeStateValidityChecker(ob.StateValidityChecker):
 
         return in_square and not in_rect
 
+
 class AntMazeBasePlanner:
     """
     Initialize StateSpace, StateValidityChecker, and ProblemDefinition
     To be inherited by specific geometric/control planners
     """
     def __init__(self):
+        # ou.setLogLevel(ou.LogLevel.LOG_WARN)
         pass
 
     def get_StateSpace(self) -> ob.StateSpace:
@@ -390,10 +405,9 @@ class AntMazeBasePlanner:
         for i in range(len(start)):
             start_state[i] = start[i].item()
         
-        # Sometimes si says start state is not in bounds even though it is...
+        # si says start_state is not in bounds even though it is...
         if not self.si.satisfiesBounds(start_state()):
             self.si.enforceBounds(start_state())
-            print(f"\nEnforcing start state {start} to be within bounds ...")
 
         assert self.state_validity_checker.isValid(start_state), (
             f"Start state {start} is not valid"
