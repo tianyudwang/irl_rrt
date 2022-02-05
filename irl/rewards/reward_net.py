@@ -1,5 +1,5 @@
 import itertools
-from typing import Mapping, Union, Optional, List
+from typing import Dict, Union, Optional, List
 
 import numpy as np
 import torch as th
@@ -12,7 +12,7 @@ class RewardNet(nn.Module):
     """
     Defines a reward function given the current observation and action
     """
-    def __init__(self, reward_params: Mapping[str, Union[float, int]]):
+    def __init__(self, reward_params: Dict[str, Union[float, int]]):
         super().__init__()
 
         self.reward_params = reward_params
@@ -25,7 +25,8 @@ class RewardNet(nn.Module):
 
         self.optimizer = optim.Adam(
             self.model.parameters(),
-            self.reward_params['learning_rate']
+            lr=self.reward_params['learning_rate'],
+            weight_decay=0.1,
         )
 
     def init_model(self, device: Optional[th.device] = th.device("cuda")) -> nn.Module:
@@ -80,97 +81,149 @@ class RewardNet(nn.Module):
     def reward_fn(self, x1: np.ndarray, x2: np.ndarray) -> float:
         """
         Compute reward for motion between state x1 and next state x2
-        This function is used as inference when collecting rollouts for SAC 
-        and does not require autograd
         """
         with th.no_grad():
             x1, x2 = self.preprocess_input(x1, x2, self.device_cpu)
             reward = self(self.model_cpu, x1, x2)
         return reward.item()
 
-    # def update(self, demo_paths, agent_paths, agent_log_probs):
+    def lcr_regularizer(self, path):
+        states, next_states = self.preprocess_input(path[:-1], path[1:], self.device)
+        rewards = self(self.model, states, next_states)
+        lcr = th.sum(th.square(rewards[1:] - rewards[:-1]), dim=0, keepdim=False)
+        return lcr
+
+
+    # def update(
+    #         self,
+    #         demo_paths: List[List[np.ndarray]],
+    #         agent_paths: List[List[np.ndarray]],
+    #         agent_log_probs: List[np.ndarray],
+    #         local_constant_rate: Optional[bool] = True
+    #     ) -> Dict[str, float]:
+    #     """Optimize the reward function
+    #     The loss function for reward parameters is
+    #     J_r(theta) = E_{(s,a)~D}[Q*(s, a) - log(E_{a'~pi(s)}[e^(Q*(s, a')) / pi(a'|s)])],
+    #     which is hard to optimize due to numerical instability in 1 / pi(a'|s)
+    #     Instead, we are using
+    #     J_r(theta) = E_{(s,a)~D}[Q*(s, a) - E_{a'~pi(s)}[Q*(s, a')]] 
     #     """
-    #     Reward function update
-    #     """
-    #     demo_rewards = self.calc_path_rewards(demo_paths)
-    #     agent_rewards = self.calc_path_rewards(agent_paths)
-    #     agent_log_probs = th.unsqueeze(ptu.from_numpy(agent_log_probs), dim=-1)
 
-    #     demo_Q = th.sum(demo_rewards, dim=2, keepdim=False)
-    #     agent_Q = th.sum(agent_rewards, dim=2, keepdim=False)
+    #     Q_diff = []
+    #     for demo_path, agent_path, agent_log_prob in zip(
+    #         demo_paths, agent_paths, agent_log_probs
+    #     ):
+    #         demo_Q = th.cat([self.compute_Q(path) for path in demo_path], dim=0)
+    #         agent_Q = th.cat([self.compute_Q(path) for path in agent_path], dim=0)
 
-    #     demo_loss = -th.sum(demo_Q)
-    #     agent_loss = th.sum(agent_Q)
-    #     #agent_loss = th.sum(torch.log(torch.mean(torch.exp(agent_Q - agent_log_probs), dim=1)))
+    #         assert len(agent_log_prob) == len(agent_path)
+    #         agent_log_prob = agent_log_prob.astype(np.float32)
+    #         assert agent_log_prob.dtype == np.float32, "agent_log_prob dtype is not np.float32"
+    #         agent_log_prob = th.from_numpy(agent_log_prob).to(self.device)
 
-    #     loss = demo_loss + agent_loss
+    #         demo_Q = th.mean(demo_Q, dim=0, keepdim=True)
+    #         # agent_Q = th.mean(agent_Q, dim=0, keepdim=True)
+
+    #         # log(E_{a'~pi(s)}[e^(Q*(s, a')) / pi(a'|s)])] = 
+    #         # log(E_{a'~pi(s)}[e^(Q*(s, a') - log pi(a'|s))])]
+    #         agent_Q = th.log(th.mean((th.exp(agent_Q - agent_log_prob)), dim=0, keepdim=True))
+    #         Q_diff.append(demo_Q - agent_Q)
+    #         print(f"demo_Q {demo_Q.item():.2f}, agent_Q {agent_Q.item():.2f}, agent_log_prob {agent_log_prob.item():.2f}")
+    #     reward_loss = th.mean(th.cat(Q_diff, dim=0))
+
+    #     demo_lcr_loss, agent_lcr_loss = [], []
+    #     if local_constant_rate:
+    #         for demo_path, agent_path in zip(demo_paths, agent_paths):
+    #             demo_lcr_loss.append(
+    #                 th.cat([self.lcr_regularizer(path) for path in demo_path], dim=0)
+    #             )
+    #             agent_lcr_loss.append(
+    #                 th.cat([self.lcr_regularizer(path) for path in agent_path], dim=0)
+    #             )
+    #     demo_lcr_loss = th.mean(th.cat(demo_lcr_loss, dim=0))
+    #     agent_lcr_loss = th.mean(th.cat(agent_lcr_loss, dim=0))
+
+    #     loss = reward_loss + demo_lcr_loss + agent_lcr_loss
+
+
     #     self.optimizer.zero_grad()
     #     loss.backward()
     #     self.optimizer.step()
+    #     train_reward_log = {
+    #         "Reward_loss": ptu.to_numpy(reward_loss), 
+    #         "demo_lcr_loss": ptu.to_numpy(demo_lcr_loss),
+    #         "agent_lcr_loss": ptu.to_numpy(agent_lcr_loss)
+    #     }
 
-    #     train_reward_log = {"Reward_loss": ptu.to_numpy(loss)}
-
-    #     print("Reward training loss:", loss.item(), demo_loss.item(), agent_loss.item())
+    #     output_str = ""
+    #     for loss_name, loss_val in train_reward_log.items():
+    #         output_str += loss_name + f" {loss_val.item():.2f} " 
+    #     print("\n", output_str)
     #     return train_reward_log
 
-    # def calc_path_rewards(self, paths: np.ndarray) -> th.Tensor:
-    #     """Calculate the rewards of transitions, requires autograd"""
-    #     states, next_states = self.preprocess_input(
-    #         paths[:,:,:-1,:], 
-    #         paths[:,:,1:,:], 
-    #         self.device
-    #     )
-    #     rewards = self(self.model, states, next_states)
-    #     return rewards
 
     def update(
             self,
-            demo_paths: List[List[np.ndarray]],
-            agent_paths: List[List[np.ndarray]],
-            agent_log_probs: List[np.ndarray]
-        ) -> Mapping[str, float]:
-        """Optimize the reward function
-        The loss function for reward parameters is
-        J_r(theta) = E_{(s,a)~D}[Q*(s, a) - log(E_{a'~pi(s)}[e^(Q*(s, a')) / pi(a'|s)])],
-        which is hard to optimize due to numerical instability in 1 / pi(a'|s)
-        Instead, we are using
-        J_r(theta) = E_{(s,a)~D}[Q*(s, a) - E_{a'~pi(s)}[Q*(s, a')]] 
-        """
-
+            demo_paths: List[th.Tensor],
+            agent_paths: List[th.Tensor],
+            agent_log_probs: th.Tensor
+        ) -> Dict[str, float]:
+        """Optimize reward neural network"""
         Q_diff = []
-        for demo_path, agent_path in zip(demo_paths, agent_paths):
-            demo_Q = th.cat([self.compute_Q(path) for path in demo_path], dim=0)
-            agent_Q = th.cat([self.compute_Q(path) for path in agent_path], dim=0)
-            demo_Q = th.mean(demo_Q, dim=0, keepdim=True)
-            agent_Q = th.mean(agent_Q, dim=0, keepdim=True)
+        for demo_path, agent_path, agent_log_prob in zip(
+            demo_paths, agent_paths, agent_log_probs
+        ):
+            demo_Q = self.compute_Q(demo_path)
+            agent_Q = self.compute_Q(agent_path)
+
+            agent_Q = th.log(th.mean((th.exp(agent_Q - agent_log_prob)), dim=0, keepdim=True))
+
             Q_diff.append(demo_Q - agent_Q)
-        loss = th.mean(th.cat(Q_diff, dim=0))
+            print(f"demo_Q {demo_Q.item():.2f}, agent_Q {agent_Q.item():.2f}, agent_log_prob {agent_log_prob.item():.2f}")
+        reward_loss = th.mean(th.cat(Q_diff, dim=0))
+
+        loss = reward_loss
 
         self.optimizer.zero_grad()
-        loss.backward()
+        loss.backward(retain_graph=True)
         self.optimizer.step()
-        train_reward_log = {"Reward_loss": ptu.to_numpy(loss)}
 
-        print(f"Reward training loss: {loss.item():.2f}")
+        train_reward_log = {
+            "Reward_loss": ptu.to_numpy(reward_loss), 
+        }
+
+        output_str = ""
+        for loss_name, loss_val in train_reward_log.items():
+            output_str += loss_name + f" {loss_val.item():.2f} " 
+        print("\n", output_str)
         return train_reward_log
 
+    # def compute_Q(
+    #         self, 
+    #         path: np.ndarray, 
+    #         device: Optional[th.device] = th.device('cuda')
+    #     ) -> th.Tensor:
+    #     """Compute the Q value of a planned path"""
+    #     assert (len(path.shape) == 2 and path.shape[1] == self.reward_params['ob_dim']), \
+    #         "path variable does not have shape (N, state_dim)"
+
+    #     if device == self.device:
+    #         states, next_states = self.preprocess_input(path[:-1], path[1:], self.device)
+    #         reward = self(self.model, states, next_states)
+    #     else:
+    #         states, next_states = self.preprocess_input(path[:-1], path[1:], self.device_cpu)
+    #         reward = self(self.model_cpu, states, next_states)
+
+    #     Q = th.sum(reward, dim=0, keepdim=False)
+    #     return Q
 
     def compute_Q(
             self, 
-            path: np.ndarray, 
-            device: Optional[th.device] = th.device('cuda')
+            path: th.Tensor
         ) -> th.Tensor:
-        """Compute the Q value of a planned path"""
-        assert (len(path.shape) == 2 and path.shape[1] == self.reward_params['ob_dim']), \
-            "path variable does not have shape (N, state_dim)"
-
-        if device == self.device:
-            states, next_states = self.preprocess_input(path[:-1], path[1:], self.device)
-            reward = self(self.model, states, next_states)
-        else:
-            states, next_states = self.preprocess_input(path[:-1], path[1:], self.device_cpu)
-            reward = self(self.model_cpu, states, next_states)
-
+        """Compute the Q value of a path"""
+        states, next_states = path[:-1], path[1:]
+        reward = self(self.model, states, next_states)
         Q = th.sum(reward, dim=0, keepdim=False)
         return Q
 

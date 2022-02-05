@@ -130,7 +130,7 @@ class PendulumControlPlanner(PendulumBasePlanner):
         start: np.ndarray, 
         solveTime: Optional[float] = 1.0,
         total_solveTime: Optional[float] = 20.0
-    ) -> Tuple[int, np.ndarray, np.ndarray]:
+    ) -> Tuple[str, np.ndarray, np.ndarray]:
         """
         Return a list of states and controls
         """
@@ -157,13 +157,13 @@ class PendulumControlPlanner(PendulumBasePlanner):
             print(
                 f"{msg}: "
                 f"Path length is {geometric_path.length():.2f}, "
-                f"cost is {geometric_path.cost(objective).value():.2f}, ",
+                f"cost is {geometric_path.cost(objective).value():.2f}, "
                 f"solve time is {t:.4f}"
             )
             # Convert to numpy arrays
             states = planner_utils.path_to_numpy(geometric_path, dim=2)
             controls = planner_utils.controls_to_numpy(controls, dim=1)
-            return planner_utils.PlannerStatus[status.asString()], states, controls
+            return status.asString(), states, controls
         else:
             print(status.asString())
             raise ValueError("OMPL is not able to solve under current cost function")

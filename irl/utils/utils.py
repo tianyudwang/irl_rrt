@@ -5,24 +5,22 @@ import gym
 import numpy as np
 
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
-import irl.utils.pytorch_util as ptu
+from irl.utils import pytorch_util as ptu
+from irl.utils import types
 
 ############################################
 ############################################
 
-def sample_trajectory(
-        env: gym.Env, 
-        policy: Union[OffPolicyAlgorithm, Any], 
-        render: Optional[bool] = False, 
-        render_mode: Optional[Tuple[str]]=('rgb_array')
-    ):
-    """Sample one trajectory"""
+def sample_trajectory(env, policy, render=False, render_mode=('rgb_array')):
+    """
+    Sample one trajectory 
+    """
     
     # initialize env for the beginning of a new rollout
-    state = env.reset() 
+    ob = env.reset() 
 
     # init vars
-    states, acs, log_probs, rewards, next_states, terminals, image_obs = [], [], [], [], [], [], []
+    obs, acs, log_probs, rewards, next_obs, terminals, image_obs = [], [], [], [], [], [], []
     steps = 0
     while True:
 
@@ -38,47 +36,70 @@ def sample_trajectory(
                 time.sleep(env.model.opt.timestep)
 
         # use the most recent ob to decide what to do
-        states.append(state.copy())
-        ac, _ = policy.predict(state, deterministic=False)
+        obs.append(ob.copy())
+        ac, _ = policy.predict(ob, deterministic=False)
         # TODO: Retrieve action log probability from policy
-        log_prob = get_log_prob(policy, ac)
+        # log_prob = get_log_prob(policy, ac)
         
         acs.append(ac)
-        log_probs.append(log_prob)
+        # log_probs.append(log_prob)
 
         # take that action and record results
-        state, rew, done, _ = env.step(ac)
+        ob, rew, done, _ = env.step(ac)
 
         # record result of taking that action
         steps += 1
-        next_states.append(state.copy())
+        next_obs.append(ob.copy())
         rewards.append(rew)
         terminals.append(done)
 
         if done:
+            obs.append(ob.copy())
             break
 
-    return Path(states, image_obs, acs, log_probs, rewards, next_states, terminals)
+    return types.TrajectoryWithReward(
+        states=np.array(obs), 
+        actions=np.array(acs), 
+        rewards=np.array(rewards)
+    )
 
-def get_log_prob(
+# def get_log_prob(
+#         policy: OffPolicyAlgorithm,
+#         action: np.ndarray, 
+#         log_min: Optional[float] = -20.0,
+#         log_max: Optional[float] = 2.0,
+#     ) -> np.ndarray:
+#     """Query the SB3 policy model for log probability of action(s)
+#     This function provides nan values for log_prob
+#     """
+#     if len(action.shape) > 1:
+#         ac = action
+#     else:
+#         ac = action[None]
+#     ac_tensor = ptu.from_numpy(ac)
+#     log_prob = policy.actor.action_dist.log_prob(ac_tensor)
+#     log_prob = log_prob.item()
+#     # Manually correct NaN values and clip range
+#     if np.isnan(log_prob): log_prob = log_min 
+#     log_prob = min(log_prob, log_max)
+#     log_prob = max(log_prob, log_min)
+#     return log_prob
+
+def action_log_prob(
         policy: OffPolicyAlgorithm,
-        action: np.ndarray, 
+        ob: np.ndarray,
         log_min: Optional[float] = -20.0,
         log_max: Optional[float] = 2.0,
     ) -> np.ndarray:
-    """Query the SB3 policy model for log probability of action(s)"""
-    if len(action.shape) > 1:
-        ac = action
-    else:
-        ac = action[None]
-    ac_tensor = ptu.from_numpy(ac)
-    log_prob = policy.actor.action_dist.log_prob(ac_tensor)
-    log_prob = log_prob.item()
-    # Manually correct NaN values and clip range
-    if np.isnan(log_prob): log_prob = log_min 
-    log_prob = min(log_prob, log_max)
-    log_prob = max(log_prob, log_min)
-    return log_prob
+    """Query SB3 policy model for action and corresponding log probability"""
+    ob, _ = policy.policy.obs_to_tensor(ob)
+    action, log_prob = policy.actor.action_log_prob(ob)
+    action = ptu.to_numpy(action)[0]
+    log_prob = ptu.to_numpy(log_prob)[0]
+    log_prob = np.clip(log_prob, log_min, log_max)
+    assert log_min <= log_prob <= log_max, f"log_prob {log_prob:.2f} not in bounds"
+    return action, log_prob
+
 
 def sample_trajectories(
         env: gym.Env, 
@@ -96,8 +117,9 @@ def sample_trajectories(
     return paths
 
 def check_demo_performance(paths):
-    returns = [path['reward'].sum() for path in paths]
-    lens = [len(path['action']) for path in paths]
+    assert type(paths[0]) == types.TrajectoryWithReward, "Demo path type is not types.TrajectoryWithReward"
+    returns = [path.rewards.sum() for path in paths]
+    lens = [len(path) for path in paths]
     print(f"Collected {len(returns)} expert demonstrations")
     print(f"Demonstration length {np.mean(lens):.2f} +/- {np.std(lens):.2f}")
     print(f"Demonstration return {np.mean(returns):.2f} +/- {np.std(returns):.2f}")

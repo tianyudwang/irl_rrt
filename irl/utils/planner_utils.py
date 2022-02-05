@@ -1,4 +1,4 @@
-from typing import Union, Optional, List, Callable
+from typing import Union, Optional, List, Callable, Tuple
 
 import os
 from collections import OrderedDict
@@ -187,3 +187,34 @@ status2color = {
 
 def color_status(status):
     return colorize(status.asString(), status2color[status.getStatus()])
+
+
+##################################################################
+
+import torch as th
+import multiprocessing as mp 
+import irl.planners.control_planner as cp
+import irl.utils.pytorch_util as ptu
+
+def plan_from_states(
+        states: th.Tensor,
+        cost_fn: Callable[[np.ndarray], np.ndarray]
+    ) -> List[np.ndarray]:
+    """Construct planner instance for each start location"""
+    states = [ptu.to_numpy(state) for state in states]
+    args = [[state, cost_fn] for state in states]
+    with mp.Pool() as pool:
+        results = pool.starmap(plan_from_state, args)
+    status, paths, controls = list(zip(*results))
+    paths = [ptu.from_numpy(path) for path in paths]
+    return paths
+
+def plan_from_state(
+        state: np.ndarray,
+        cost_fn: Callable[[np.ndarray], np.ndarray]
+    ) -> Tuple[str, np.ndarray, np.ndarray]:
+    planner = cp.PendulumSSTPlanner()
+    planner.update_ss_cost(cost_fn)
+    status, path, control = planner.plan(state)
+    assert status in PlannerStatus.keys(), f"Planner status {status}"
+    return status, path, control

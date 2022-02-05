@@ -35,8 +35,9 @@ class Trainer():
         }
 
         train_args = {
-            'reward_updates_per_iter': params['reward_updates_per_iter'],
-            'transitions_per_reward_update': params['transitions_per_reward_update'],
+            'reward_updates_per_itr': params['reward_updates_per_itr'],
+            # 'transitions_per_reward_update': params['transitions_per_reward_update'],
+            'transitions_per_itr': params['transitions_per_itr'],
             'agent_actions_per_demo_transition': params['agent_actions_per_demo_transition']
         }
 
@@ -95,11 +96,49 @@ class Trainer():
 
         self.agent = IRL_Agent(self.env, self.params['agent_params'])
 
-    def training_loop(self):
+    # def training_loop(self):
 
+    #     self.start_time = time.time()
+
+    #     # Collect expert demonstrations
+    #     demo_paths = self.collect_demo_trajectories(
+    #         self.params['expert_policy'], self.params['demo_size'])
+    #     self.agent.add_to_buffer(demo_paths)
+
+    #     for itr in range(self.params['n_iter']):
+    #         print("\n********** Iteration {} ************".format(itr))
+
+    #         # decide if videos should be rendered/logged at this iteration
+    #         self.log_video = all([
+    #             (itr + 1) % self.params["video_log_freq"] == 0,
+    #             self.params["video_log_freq"] != -1,
+    #         ])
+
+    #         # decide if metrics should be logged
+    #         self.logmetrics = all([
+    #             (itr + 1) % self.params["scalar_log_freq"] == 0,
+    #             self.params["scalar_log_freq"] != -1,
+    #         ])
+
+    #         reward_logs = self.agent.train_reward()
+    #         policy_logs = self.agent.train_policy()
+
+    #         # log/save
+    #         if self.log_video or self.logmetrics:
+    #             model_dir = os.path.join(self.params['logdir'], f"models_itr_{itr:02d}")
+    #             if not (os.path.exists(model_dir)):
+    #                 os.makedirs(model_dir, exist_ok=True)
+    #             self.agent.reward.save(os.path.join(model_dir, "reward.pt"))
+    #             self.agent.actor.save(os.path.join(model_dir, "SAC"))
+
+    #             # perform logging
+    #             print('\nBeginning logging procedure...')
+    #             self.perform_logging(itr, self.agent.actor, reward_logs, policy_logs)
+
+    def training_loop(self):
         self.start_time = time.time()
 
-        # Collect expert demonstrations
+        # Collect expert demonstrations and save to buffer
         demo_paths = self.collect_demo_trajectories(
             self.params['expert_policy'], self.params['demo_size'])
         self.agent.add_to_buffer(demo_paths)
@@ -107,32 +146,41 @@ class Trainer():
         for itr in range(self.params['n_iter']):
             print("\n********** Iteration {} ************".format(itr))
 
-            # decide if videos should be rendered/logged at this iteration
-            self.log_video = all([
-                (itr + 1) % self.params["video_log_freq"] == 0,
-                self.params["video_log_freq"] != -1,
-            ])
+            # Change log booleans for this iteration
+            self.check_log(itr)
 
-            # decide if metrics should be logged
-            self.logmetrics = all([
-                (itr + 1) % self.params["scalar_log_freq"] == 0,
-                self.params["scalar_log_freq"] != -1,
-            ])
+            reward_logs, policy_logs = self.agent.train()
 
-            reward_logs = self.agent.train_reward()
-            policy_logs = self.agent.train_policy()
 
             # log/save
             if self.log_video or self.logmetrics:
                 model_dir = os.path.join(self.params['logdir'], f"models_itr_{itr:02d}")
                 if not (os.path.exists(model_dir)):
                     os.makedirs(model_dir, exist_ok=True)
-                self.agent.reward.save(os.path.join(model_dir, "reward.pt"))
-                self.agent.actor.save(os.path.join(model_dir, "SAC"))
+                # self.agent.reward.save(os.path.join(model_dir, "reward.pt"))
+                # self.agent.actor.save(os.path.join(model_dir, "SAC"))
 
                 # perform logging
                 print('\nBeginning logging procedure...')
-                self.perform_logging(itr, self.agent.actor, reward_logs, policy_logs)
+                self.perform_logging(itr, self.agent.policy, reward_logs, policy_logs)
+
+
+
+
+    def check_log(self, itr):
+        """Decide if we need to log metrics in this iteration"""
+        # decide if videos should be rendered/logged at this iteration
+        self.log_video = all([
+            (itr + 1) % self.params["video_log_freq"] == 0,
+            self.params["video_log_freq"] != -1,
+        ])
+
+        # decide if metrics should be logged
+        self.logmetrics = all([
+            (itr + 1) % self.params["scalar_log_freq"] == 0,
+            self.params["scalar_log_freq"] != -1,
+        ])
+
 
     def collect_demo_trajectories(
             self, 
@@ -148,15 +196,15 @@ class Trainer():
         expert_policy = SAC.load(expert_policy)
         print('\nRunning expert policy to collect demonstrations...')
         demo_paths = utils.sample_trajectories(
-            self.env, expert_policy, batch_size)
-        #demo_paths = utils.pad_absorbing_states(demo_paths)
+            self.env, expert_policy, batch_size
+        )
         utils.check_demo_performance(demo_paths)
         return demo_paths
 
 
     def perform_logging(self, itr, eval_policy, reward_logs, policy_logs):
 
-        last_log = reward_logs[-1]
+        last_log = reward_logs
 
         #######################
 
@@ -185,10 +233,10 @@ class Trainer():
         # TODO: should add a visualization tool to check the trained reward function
         if self.logmetrics:
             # returns, for logging
-            eval_returns = [eval_path["reward"].sum() for eval_path in eval_paths]
+            eval_returns = [eval_path.rewards.sum() for eval_path in eval_paths]
 
             # episode lengths, for logging
-            eval_ep_lens = [len(eval_path["reward"]) for eval_path in eval_paths]
+            eval_ep_lens = [len(eval_path) for eval_path in eval_paths]
 
             # decide what to log
             logs = OrderedDict()
@@ -221,13 +269,17 @@ def main():
         help='Number of expert paths to add to replay buffer'
     )
     parser.add_argument(
-        '--reward_updates_per_iter', type=int, default=8,
-        help='Number of reward updates per iteration'
+        '--transitions_per_itr', type=int, default=128,
+        help='Number of expert transitions to sample per iteration'
     )
     parser.add_argument(
-        '--transitions_per_reward_update', type=int, default=128,
-        help='Number of agent transitions per reward update'
+        '--reward_updates_per_itr', type=int, default=8,
+        help='Number of reward updates per iteration'
     )
+    # parser.add_argument(
+    #     '--transitions_per_reward_update', type=int, default=32,
+    #     help='Number of agent transitions per reward update'
+    # )
     parser.add_argument(
         '--agent_actions_per_demo_transition', type=int, default=1,
         help='Number of agent actions sampled for each expert_transition'
