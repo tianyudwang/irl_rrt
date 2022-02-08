@@ -118,7 +118,7 @@ class PendulumControlPlanner(PendulumBasePlanner):
         cspace.setBounds(c_bounds)
 
         #########################################
-        print(f"\nCreated control space {cspace.getName()} with {cspace.getDimension()} dimensions")
+        # print(f"\nCreated control space {cspace.getName()} with {cspace.getDimension()} dimensions")
 
         return cspace
 

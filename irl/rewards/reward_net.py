@@ -88,7 +88,7 @@ class RewardNet(nn.Module):
         return reward.item()
 
     def lcr_regularizer(self, path):
-        states, next_states = self.preprocess_input(path[:-1], path[1:], self.device)
+        states, next_states = path[:-1], path[1:]
         rewards = self(self.model, states, next_states)
         lcr = th.sum(th.square(rewards[1:] - rewards[:-1]), dim=0, keepdim=False)
         return lcr
@@ -165,37 +165,54 @@ class RewardNet(nn.Module):
     def update(
             self,
             demo_paths: List[th.Tensor],
-            agent_paths: List[th.Tensor],
-            agent_log_probs: th.Tensor
+            agent_paths_l: List[List[th.Tensor]],
+            agent_log_probs_l: List[th.Tensor]
         ) -> Dict[str, float]:
         """Optimize reward neural network"""
-        Q_diff = []
-        for demo_path, agent_path, agent_log_prob in zip(
-            demo_paths, agent_paths, agent_log_probs
-        ):
-            demo_Q = self.compute_Q(demo_path)
-            agent_Q = self.compute_Q(agent_path)
 
+        demo_Qs, agent_Qs = [], []
+        for i in range(len(demo_paths)):
+            demo_Q = self.compute_Q(demo_paths[i])
+            agent_Q = th.cat([self.compute_Q(paths[i]) for paths in agent_paths_l])
+            agent_log_prob = th.stack([log_probs[i] for log_probs in agent_log_probs_l])
+
+            assert agent_Q.shape == agent_log_prob.shape
             agent_Q = th.log(th.mean((th.exp(agent_Q - agent_log_prob)), dim=0, keepdim=True))
 
-            Q_diff.append(demo_Q - agent_Q)
-            print(f"demo_Q {demo_Q.item():.2f}, agent_Q {agent_Q.item():.2f}, agent_log_prob {agent_log_prob.item():.2f}")
-        reward_loss = th.mean(th.cat(Q_diff, dim=0))
+            demo_Qs.append(demo_Q)
+            agent_Qs.append(agent_Q)
+        
+        # Reward loss
+        demo_Qs = th.mean(th.cat(demo_Qs, dim=0))
+        agent_Qs = th.mean(th.cat(agent_Qs, dim=0))
+        reward_loss = demo_Qs - agent_Qs
 
-        loss = reward_loss
+        # Regularization loss
+        demo_lcr_loss = [self.lcr_regularizer(path) for path in demo_paths]
+        agent_lcr_loss = [
+            self.lcr_regularizer(path) for agent_paths in agent_paths_l 
+            for path in agent_paths 
+        ]
+        demo_lcr_loss = th.mean(th.cat(demo_lcr_loss, dim=0))
+        agent_lcr_loss = th.mean(th.cat(agent_lcr_loss, dim=0))
+
+        loss = reward_loss + demo_lcr_loss + agent_lcr_loss
 
         self.optimizer.zero_grad()
-        loss.backward(retain_graph=True)
+        loss.backward()
         self.optimizer.step()
 
         train_reward_log = {
-            "Reward_loss": ptu.to_numpy(reward_loss), 
+            "Reward/demo_Q": ptu.to_numpy(demo_Qs),
+            "Reward/agent_Q": ptu.to_numpy(agent_Qs),
+            "Reward/agent_log_prob": ptu.to_numpy(th.mean(th.cat(agent_log_probs_l))),
+            "Reward/reward_loss": ptu.to_numpy(reward_loss), 
+            "Reward/demo_lcr_loss": ptu.to_numpy(demo_lcr_loss),
+            "Reward/agent_lcr_loss": ptu.to_numpy(agent_lcr_loss),
         }
 
-        output_str = ""
         for loss_name, loss_val in train_reward_log.items():
-            output_str += loss_name + f" {loss_val.item():.2f} " 
-        print("\n", output_str)
+            print(loss_name, f" {loss_val.item():.2f}")
         return train_reward_log
 
     # def compute_Q(

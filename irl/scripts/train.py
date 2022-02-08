@@ -240,14 +240,15 @@ class Trainer():
 
             # decide what to log
             logs = OrderedDict()
-            logs["Eval_AverageReturn"] = np.mean(eval_returns)
-            logs["Eval_StdReturn"] = np.std(eval_returns)
-            logs["Eval_MaxReturn"] = np.max(eval_returns)
-            logs["Eval_MinReturn"] = np.min(eval_returns)
-            logs["Eval_AverageEpLen"] = np.mean(eval_ep_lens)
+            logs["Eval/AverageReturn"] = np.mean(eval_returns)
+            logs["Eval/StdReturn"] = np.std(eval_returns)
+            logs["Eval/MaxReturn"] = np.max(eval_returns)
+            logs["Eval/MinReturn"] = np.min(eval_returns)
+            logs["Eval/AverageEpLen"] = np.mean(eval_ep_lens)
 
             logs["TimeSinceStart"] = time.time() - self.start_time
-            logs.update(last_log)
+            logs.update(reward_logs)
+            logs.update(policy_logs)
 
             # perform the logging
             for key, value in logs.items():
@@ -269,7 +270,7 @@ def main():
         help='Number of expert paths to add to replay buffer'
     )
     parser.add_argument(
-        '--transitions_per_itr', type=int, default=128,
+        '--transitions_per_itr', type=int, default=32,
         help='Number of expert transitions to sample per iteration'
     )
     parser.add_argument(
@@ -281,7 +282,7 @@ def main():
     #     help='Number of agent transitions per reward update'
     # )
     parser.add_argument(
-        '--agent_actions_per_demo_transition', type=int, default=1,
+        '--agent_actions_per_demo_transition', type=int, default=4,
         help='Number of agent actions sampled for each expert_transition'
     )
     parser.add_argument(

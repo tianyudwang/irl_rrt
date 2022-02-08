@@ -203,7 +203,7 @@ def plan_from_states(
     """Construct planner instance for each start location"""
     states = [ptu.to_numpy(state) for state in states]
     args = [[state, cost_fn] for state in states]
-    with mp.Pool() as pool:
+    with mp.Pool(os.cpu_count()-1) as pool:
         results = pool.starmap(plan_from_state, args)
     status, paths, controls = list(zip(*results))
     paths = [ptu.from_numpy(path) for path in paths]
@@ -218,3 +218,16 @@ def plan_from_state(
     status, path, control = planner.plan(state)
     assert status in PlannerStatus.keys(), f"Planner status {status}"
     return status, path, control
+
+def add_states_to_paths(
+        states: th.Tensor, 
+        paths: th.Tensor
+    ) -> List[th.Tensor]:
+    """Add initial states to path"""
+    assert len(states) == len(paths), "Lengths of state and paths are not equal"
+    padded_paths = [
+        th.cat((state.reshape(1, -1), path), dim=0) 
+        for state, path in zip(states, paths)
+    ]
+    return padded_paths
+

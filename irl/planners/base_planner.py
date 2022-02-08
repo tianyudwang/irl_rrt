@@ -64,7 +64,7 @@ class PendulumBasePlanner:
     """
 
     def __init__(self):
-        ou.setLogLevel(ou.LogLevel.LOG_WARN)
+        ou.setLogLevel(ou.LogLevel.LOG_ERROR)
 
     def get_StateSpace(self) -> ob.StateSpace:
         """

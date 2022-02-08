@@ -41,12 +41,12 @@ class IRL_Agent(BaseAgent):
         self.irl_env = IRLEnv(self.env, self.reward)
 
         # actor/policy with wrapped env
-        # self.actor = SAC("MlpPolicy", self.irl_env, verbose=1)
-        self.policy = self.make_actor()
+        self.policy = SAC("MlpPolicy", self.irl_env, verbose=1)
+        # self.policy = self.make_actor()
 
         self.state_dim = self.agent_params['ob_dim']
 
-        self.planner = PendulumSSTPlanner()
+        # self.planner = PendulumSSTPlanner()
         # self.planner = Planner()
 
         # Replay buffer to hold demo transitions
@@ -80,96 +80,111 @@ class IRL_Agent(BaseAgent):
     def train(self):
 
         # Sample a minibatch of expert transitions
-        demo_transitions = self.sample_transitions(self.agent_params['transitions_per_itr'])
-        demo_states = ptu.from_numpy(
-            np.stack([transition.state for transition in demo_transitions])
-        )
-        demo_next_states = ptu.from_numpy(
-            np.stack([transition.next_state for transition in demo_transitions])
-        )
+        # demo_transitions = self.sample_transitions(self.agent_params['transitions_per_itr'])
+        # demo_states = ptu.from_numpy(
+        #     np.stack([transition.state for transition in demo_transitions])
+        # )
+        # demo_next_states = ptu.from_numpy(
+        #     np.stack([transition.next_state for transition in demo_transitions])
+        # )
 
-        # Sample agent actions from expert states and compute next states
-        agent_actions, agent_log_probs = self.policy.action_log_prob(demo_states)
+        # # Sample agent actions from expert states and compute next states
+        # agent_actions_l, agent_log_probs_l = self.sample_agent_action_log_prob(demo_states)
+        # agent_next_states_l = self.next_states_from_env(demo_states, agent_actions_l)
 
-        agent_next_states = self.add_next_states_from_env(demo_states, agent_actions)
-        assert agent_next_states.shape == demo_states.shape
+        # # Copy reward NN weight from cuda to cpu, 
+        # # set model to eval mode in case there are BatchNorm, Dropout layers
+        # # and update to planner
+        # # self.reward.copy_model_to_cpu()
+        # # self.reward.model_cpu.eval()
+        # # self.planner.update_ss_cost(self.reward.cost_fn)
 
-        # Copy reward NN weight from cuda to cpu, 
-        # set model to eval mode in case there are BatchNorm, Dropout layers
-        # and update to planner
-        self.reward.copy_model_to_cpu()
-        # self.reward.model_cpu.eval()
-        # self.planner.update_ss_cost(self.reward.cost_fn)
+        # # Plan optimal paths from next states to goal under current reward function        
+        # demo_paths = planner_utils.plan_from_states(demo_next_states, self.reward.cost_fn)
+        # agent_paths_l = [
+        #     planner_utils.plan_from_states(agent_next_states, self.reward.cost_fn) 
+        #     for agent_next_states in agent_next_states_l
+        # ]
 
-        # Plan optimal paths from next states to goal under current reward function        
-        demo_paths = planner_utils.plan_from_states(demo_next_states, self.reward.cost_fn)
-        agent_paths = planner_utils.plan_from_states(agent_next_states, self.reward.cost_fn)
-
-        # demo_paths = self.plan_from_states(demo_next_states)
-        # agent_paths = self.plan_from_states(agent_next_states)
-
-        # Add first state back to each path
-        demo_paths = [
-            th.cat((state.reshape(1, -1), path), dim=0) 
-            for state, path in zip(demo_states, demo_paths)
-        ]
-        agent_paths = [
-            th.cat((state.reshape(1, -1), path), dim=0)
-            for state, path in zip(demo_states, agent_paths)
-        ]
+        # # Add first state back to each path
+        # demo_paths = planner_utils.add_states_to_paths(demo_states, demo_paths)
+        # agent_paths_l = [
+        #     planner_utils.add_states_to_paths(demo_states, agent_paths)
+        #     for agent_paths in agent_paths_l
+        # ]
 
         # Optimize reward
-        # for i in range(4):
-        reward_logs = self.reward.update(demo_paths, agent_paths, agent_log_probs)
-        
-        # Optimize policy
-        # for i in range(4):
-        policy_logs = self.train_policy(agent_paths, agent_log_probs)
+        # reward_logs = self.reward.update(demo_paths, agent_paths_l, agent_log_probs_l)
+        reward_logs = {"Reward/loss": 0}
 
+        # Optimize policy
+        # policy_logs = self.train_policy(agent_paths_l, agent_log_probs_l)
+        policy_logs = self.train_policy()
 
         return reward_logs, policy_logs
 
 
-    def add_next_states_from_env(
+    def next_states_from_env(
             self, 
             states: th.Tensor, 
-            actions: th.Tensor
-        ) -> th.Tensor:
+            actions_l: List[th.Tensor]
+        ) -> List[th.Tensor]:
         """Query the environment for next states"""
+        # states = ptu.to_numpy(states)
+        # actions = ptu.to_numpy(actions)
+        # next_states = []
+        # for state, action in zip(states, actions):
+        #     next_states.append(self.env.one_step_transition(state, action))
+        # return ptu.from_numpy(np.stack(next_states))
+
         states = ptu.to_numpy(states)
-        actions = ptu.to_numpy(actions)
+        actions_l = [ptu.to_numpy(actions) for actions in actions_l]
+        next_states_l = []
+        for actions in actions_l:
+            assert len(states) == len(actions), "Sampled actions not equal to states"
+            next_states = []
+            for state, action in zip(states, actions):
+                next_states.append(self.env.one_step_transition(state, action))
+            next_states = ptu.from_numpy(np.stack(next_states))
+            assert next_states.shape == states.shape, "Sampled next states not equal to states"
+            next_states_l.append(next_states)
+        return next_states_l
 
-        assert len(states) == len(actions)
-        next_states = []
-        for state, action in zip(states, actions):
-            next_states.append(self.env.one_step_transition(state, action))
-
-        agent_next_states = ptu.from_numpy(np.stack(next_states))
-        return agent_next_states
-
-
-    def train_policy(
+    def sample_agent_action_log_prob(
             self, 
-            agent_paths: List[th.Tensor],
-            agent_log_probs: th.Tensor
-        ) -> Dict[str, float]:
+            demo_states: th.Tensor
+        ) -> Tuple[th.Tensor, th.Tensor]:
+        """Sample agent actions and log probabilities from demo states"""
+        action_log_prob_l = [
+            self.policy.policy.actor.action_log_prob(demo_states)
+            for _ in range(self.agent_params['agent_actions_per_demo_transition'])
+        ]
+        agent_actions, agent_log_probs = list(zip(*action_log_prob_l))
+        return agent_actions, agent_log_probs
 
-        agent_Q = th.cat([self.reward.compute_Q(path) for path in agent_paths])
-        policy_loss = (agent_log_probs - agent_Q).mean()
 
-        self.policy.optimizer.zero_grad()
-        policy_loss.backward()
-        self.policy.optimizer.step()
+    # def train_policy(
+    #         self, 
+    #         agent_paths: List[th.Tensor],
+    #         agent_log_probs: th.Tensor
+    #     ) -> Dict[str, float]:
 
-        policy_logs = {
-            "Policy_loss": ptu.to_numpy(policy_loss)
-        }
+    #     agent_Q = th.cat([self.reward.compute_Q(path) for path in agent_paths])
+    #     policy_loss = (agent_log_probs - agent_Q).mean()
 
-        output_str = ""
-        for loss_name, loss_val in policy_logs.items():
-            output_str += loss_name + f" {loss_val.item():.2f} " 
-        print("\n", output_str)
-        return policy_logs
+    #     self.policy.optimizer.zero_grad()
+    #     policy_loss.backward()
+    #     self.policy.optimizer.step()
+
+    #     policy_logs = {
+    #         "Policy_loss": ptu.to_numpy(policy_loss)
+    #     }
+
+    #     output_str = ""
+    #     for loss_name, loss_val in policy_logs.items():
+    #         output_str += loss_name + f" {loss_val.item():.2f} " 
+    #     print("\n", output_str)
+    #     return policy_logs
 
     # def train_reward(self) -> Mapping[str, float]:
     #     """Train the reward function"""
@@ -307,14 +322,14 @@ class IRL_Agent(BaseAgent):
 
 
 
-    # def train_policy(self):
-    #     """
-    #     Train the policy/actor using learned reward
-    #     """
-    #     print('\nTraining agent policy...')
-    #     self.actor.learn(total_timesteps=10000, log_interval=5)
-    #     train_log = {'Policy loss': 0}
-    #     return train_log
+    def train_policy(self):
+        """
+        Train the policy/actor using learned reward
+        """
+        print('\nTraining agent policy...')
+        self.policy.learn(total_timesteps=1024*4, log_interval=5)
+        train_log = {'Policy/policy_loss': 0}
+        return train_log
 
     #####################################################
     #####################################################
