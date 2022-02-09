@@ -13,8 +13,6 @@ from stable_baselines3.common.torch_layers import FlattenExtractor
 
 from irl.agents.base_agent import BaseAgent 
 from irl.rewards.reward_net import RewardNet
-from irl.planners.control_planner import PendulumSSTPlanner
-# from irl.planners.planner import Planner
 
 import irl.utils.pytorch_util as ptu 
 from irl.utils import utils, types, planner_utils
@@ -80,42 +78,43 @@ class IRL_Agent(BaseAgent):
     def train(self):
 
         # Sample a minibatch of expert transitions
-        # demo_transitions = self.sample_transitions(self.agent_params['transitions_per_itr'])
-        # demo_states = ptu.from_numpy(
-        #     np.stack([transition.state for transition in demo_transitions])
-        # )
-        # demo_next_states = ptu.from_numpy(
-        #     np.stack([transition.next_state for transition in demo_transitions])
-        # )
+        demo_transitions = self.sample_transitions(self.agent_params['transitions_per_itr'])
+        demo_states = ptu.from_numpy(
+            np.stack([transition.state for transition in demo_transitions])
+        )
+        demo_next_states = ptu.from_numpy(
+            np.stack([transition.next_state for transition in demo_transitions])
+        )
 
         # # Sample agent actions from expert states and compute next states
-        # agent_actions_l, agent_log_probs_l = self.sample_agent_action_log_prob(demo_states)
-        # agent_next_states_l = self.next_states_from_env(demo_states, agent_actions_l)
+        agent_actions_l, agent_log_probs_l = self.sample_agent_action_log_prob(demo_states)
+        agent_next_states_l = self.next_states_from_env(demo_states, agent_actions_l)
 
-        # # Copy reward NN weight from cuda to cpu, 
-        # # set model to eval mode in case there are BatchNorm, Dropout layers
-        # # and update to planner
-        # # self.reward.copy_model_to_cpu()
-        # # self.reward.model_cpu.eval()
-        # # self.planner.update_ss_cost(self.reward.cost_fn)
+        # Copy reward NN weight from cuda to cpu, 
+        # set model to eval mode in case there are BatchNorm, Dropout layers
+        # and update to planner
+        self.reward.copy_model_to_cpu()
+        self.reward.model_cpu.eval()
 
-        # # Plan optimal paths from next states to goal under current reward function        
-        # demo_paths = planner_utils.plan_from_states(demo_next_states, self.reward.cost_fn)
-        # agent_paths_l = [
-        #     planner_utils.plan_from_states(agent_next_states, self.reward.cost_fn) 
-        #     for agent_next_states in agent_next_states_l
-        # ]
+        # Plan optimal paths from next states to goal under current reward function        
+        demo_paths = planner_utils.plan_from_states(demo_next_states, self.reward.cost_fn)
+        agent_paths_l = [
+            planner_utils.plan_from_states(agent_next_states, self.reward.cost_fn) 
+            for agent_next_states in agent_next_states_l
+        ]
 
-        # # Add first state back to each path
-        # demo_paths = planner_utils.add_states_to_paths(demo_states, demo_paths)
-        # agent_paths_l = [
-        #     planner_utils.add_states_to_paths(demo_states, agent_paths)
-        #     for agent_paths in agent_paths_l
-        # ]
+        # Add first state back to each path
+        demo_paths = planner_utils.add_states_to_paths(demo_states, demo_paths)
+        agent_paths_l = [
+            planner_utils.add_states_to_paths(demo_states, agent_paths)
+            for agent_paths in agent_paths_l
+        ]
+
+        import ipdb; ipdb.set_trace()
 
         # Optimize reward
-        # reward_logs = self.reward.update(demo_paths, agent_paths_l, agent_log_probs_l)
-        reward_logs = {"Reward/loss": 0}
+        reward_logs = self.reward.update(demo_paths, agent_paths_l, agent_log_probs_l)
+        # reward_logs = {"Reward/loss": 0}
 
         # Optimize policy
         # policy_logs = self.train_policy(agent_paths_l, agent_log_probs_l)
@@ -125,10 +124,10 @@ class IRL_Agent(BaseAgent):
 
 
     def next_states_from_env(
-            self, 
-            states: th.Tensor, 
-            actions_l: List[th.Tensor]
-        ) -> List[th.Tensor]:
+        self, 
+        states: th.Tensor, 
+        actions_l: List[th.Tensor]
+    ) -> List[th.Tensor]:
         """Query the environment for next states"""
         # states = ptu.to_numpy(states)
         # actions = ptu.to_numpy(actions)
@@ -151,9 +150,9 @@ class IRL_Agent(BaseAgent):
         return next_states_l
 
     def sample_agent_action_log_prob(
-            self, 
-            demo_states: th.Tensor
-        ) -> Tuple[th.Tensor, th.Tensor]:
+        self, 
+        demo_states: th.Tensor
+    ) -> Tuple[th.Tensor, th.Tensor]:
         """Sample agent actions and log probabilities from demo states"""
         action_log_prob_l = [
             self.policy.policy.actor.action_log_prob(demo_states)
@@ -186,148 +185,13 @@ class IRL_Agent(BaseAgent):
     #     print("\n", output_str)
     #     return policy_logs
 
-    # def train_reward(self) -> Mapping[str, float]:
-    #     """Train the reward function"""
-    #     print('\nTraining agent reward function...')
-    #     demo_transitions = self.sample_transitions(self.agent_params['transitions_per_reward_update'])
-
-    #     # Synchronize reward net weights on cpu and cuda 
-    #     self.reward.copy_model_to_cpu()
-    #     # Update OMPL SimpleSetup object cost function with current learned reward
-    #     self.reward.model_cpu.eval()
-    #     self.planner.update_ss_cost(self.reward.cost_fn)
-
-    #     demo_paths = []
-    #     agent_paths = []
-    #     agent_log_probs = []
-
-    #     for i in range(self.agent_params['transitions_per_reward_update']):
-    #         # Sample expert transitions (s, a, s')
-    #         # and find optimal path from s' to goal
-    #         print(f"Planning trajectory {i+1}/{self.agent_params['transitions_per_reward_update']} from expert state ...")
-    #         ob, ac, log_probs, rewards, next_ob, done = [var[i] for var in demo_transitions]
-    #         status, path, controls = self.planner.plan(next_ob)
-    #         path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
-    #         demo_paths.append([path])
-            
-    #         # and find optimal path from s'_a to goal
-    #         paths = []
-    #         log_probs = []
-    #         for j in range(self.agent_params['agent_actions_per_demo_transition']):
-    #             # Sample agent transitions (s, a, s') at each expert state s
-    #             print(f"Planning trajectory {j+1}/{self.agent_params['agent_actions_per_demo_transition']} from agent state")
-    #             # agent_ac, _ = self.actor.predict(ob)
-    #             # log_prob = utils.get_log_prob(self.actor, agent_ac)
-    #             agent_ac, log_prob = utils.action_log_prob(self.actor, ob)
-    #             agent_next_ob = self.env.one_step_transition(ob, agent_ac)
-                
-    #             # Find optimal path from s' to goal
-    #             status, path, controls = self.planner.plan(agent_next_ob)
-    #             path = np.concatenate((ob.reshape(1, self.state_dim), path), axis=0)
-    #             paths.append(path)
-    #             log_probs.append(log_prob)
-    #         agent_paths.append(paths)
-    #         agent_log_probs.append(np.array(log_probs))
-
-    #     # demo_paths = self.collate_fn(demo_paths)
-    #     # agent_paths = self.collate_fn(agent_paths)
-    #     # agent_log_probs = np.array(agent_log_probs)
-
-    #     reward_logs = []
-    #     for step in range(self.agent_params['reward_updates_per_iter']):
-    #         reward_logs.append(self.reward.update(demo_paths, agent_paths, agent_log_probs))
-    #     return reward_logs
-
-
-    # def train_reward_mp(self) -> Mapping[str, float]:
-    #     """Same function as above but uses multiprocessing to plan optimal paths"""
-    #     print('\nTraining agent reward function...')
-    #     demo_transitions = self.sample_transitions(self.agent_params['transitions_per_reward_update'])
-    #     demo_transitions = [[var[i] for var in demo_transitions]
-    #         for i in range(self.agent_params['transitions_per_reward_update'])]
-    #     agent_next_states, agent_log_probs = self.sample_agent_transitions(demo_transitions)
-        
-    #     # Synchronize reward net weights for cost inference on cpu in motion planning
-    #     self.reward.copy_model_to_cpu()
-        
-    #     # Update OMPL SimpleSetup object cost function with current learned reward
-    #     self.planner.update_cost(self.reward.cost_fn)
-
-    #     demo_paths, agent_paths = self.planner.plan_mp(demo_transitions, agent_next_states)
-
-    #     reward_logs = []
-    #     for step in range(self.agent_params['reward_updates_per_iter']):
-    #         reward_logs.append(self.reward.update(demo_paths, agent_paths, agent_log_probs))
-    #     return reward_logs
-
-    # def sample_agent_transitions(
-    #         self, 
-    #         demo_transitions: List[List[np.ndarray]]
-    #     ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-    #     """Sample agent policy transitions at each expert state"""
-    #     agent_next_states = [[] for _ in range(len(demo_transitions))]
-    #     agent_log_probs = [[] for _ in range(len(demo_transitions))]
-    #     for i, demo_transition in enumerate(demo_transitions):
-    #         state = demo_transition[0]
-    #         for j in range(self.agent_params['agent_actions_per_demo_transition']):
-    #             agent_ac, _ = self.actor.predict(state)
-    #             log_prob = utils.get_log_prob(self.actor, agent_ac)
-    #             agent_next_state = self.env.one_step_transition(state, agent_ac)
-    #             agent_next_states[i].append(agent_next_state)
-    #             agent_log_probs[i].append(log_prob)
-    #     return agent_next_states, agent_log_probs
-
-    # def plan_paths_from_demo_state(
-    #         self, 
-    #         demo_transition: List[np.ndarray]
-    #     ) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
-    #     """Plan optimal paths from expert and agent next_states"""
-    #     state, _, _, _, next_state, _ = demo_transition
-    #     path, controls = self.planner.plan(next_state)
-    #     demo_paths = [np.concatenate((state.reshape(1, self.state_dim), path), axis=0)]
-
-    #     # agent_paths, agent_log_probs = [], []
-    #     # for j in range(self.agent_params['agent_actions_per_demo_transition']):
-    #     #     agent_ac, _ = self.actor.predict(state)
-    #     #     log_prob = utils.get_log_prob(self.actor, agent_ac)
-    #     #     agent_next_state = self.env.one_step_transition(state, agent_ac)
-    #     #     path, controls = self.planner.plan(agent_next_state)
-    #     #     path = np.concatenate((state.reshape(1, self.state_dim), path), axis=0)
-    #     #     agent_paths.append(path)
-    #     #     agent_log_probs.append(log_prob)
-
-    #     return demo_paths#, agent_paths, agent_log_probs
-
-
-    # def collate_fn(self, paths):
-    #     """
-    #     Pad the list of variable-length paths with goal locations
-    #     """
-    #     T = max([len(p) for path_l in paths for p in path_l])
-    #     paths = np.array([[np.pad(p, ((0, T-p.shape[0]),(0,0)), 'edge') 
-    #              for p in path_l] for path_l in paths])
-    #     return paths
-
-#    def plan_optimal_paths(self, transitions):
-#        """
-#        For each transition (s, a, s'), we find the optimal path from s' to goal
-#        """
-#        num_transitions = transitions[0].shape[0]
-#        paths = []
-#        for i in range(num_transitions):
-#            obs, ac, rew, next_obs, done = [var[i] for var in transitions]
-#            path = self.RRT_plan(next_obs)
-#            paths.append(path)
-#        return paths
-
-
 
     def train_policy(self):
         """
         Train the policy/actor using learned reward
         """
         print('\nTraining agent policy...')
-        self.policy.learn(total_timesteps=1024*4, log_interval=5)
+        self.policy.learn(total_timesteps=1024*4, log_interval=16)
         train_log = {'Policy/policy_loss': 0}
         return train_log
 

@@ -12,7 +12,7 @@ from irl.agents.irl_agent import IRL_Agent
 import irl.utils.pytorch_util as ptu 
 import irl.utils.utils as utils
 from irl.utils.logger import Logger
-from irl.utils.wrappers import PendulumWrapper
+from irl.utils.wrappers import ReacherWrapper
 
 
 # how many rollouts to save as videos to tensorboard
@@ -75,13 +75,13 @@ class Trainer():
 
     def init_env(self):
         """Load environment with fixed random seed"""
-        assert self.params['env_name'] == 'Pendulum-v1', (
+        assert self.params['env_name'] == 'Reacher-v2', (
             f"Environment {self.params['env_name']} not supported yet."
         )
         seed = self.params['seed']
         rng = np.random.RandomState(seed)
         env_seed = rng.randint(0, (1 << 31) - 1)
-        self.env = PendulumWrapper(gym.make(self.params['env_name']))
+        self.env = ReacherWrapper(gym.make(self.params['env_name']))
         print(env_seed)
         self.env.seed(int(env_seed))
 
@@ -96,44 +96,6 @@ class Trainer():
 
         self.agent = IRL_Agent(self.env, self.params['agent_params'])
 
-    # def training_loop(self):
-
-    #     self.start_time = time.time()
-
-    #     # Collect expert demonstrations
-    #     demo_paths = self.collect_demo_trajectories(
-    #         self.params['expert_policy'], self.params['demo_size'])
-    #     self.agent.add_to_buffer(demo_paths)
-
-    #     for itr in range(self.params['n_iter']):
-    #         print("\n********** Iteration {} ************".format(itr))
-
-    #         # decide if videos should be rendered/logged at this iteration
-    #         self.log_video = all([
-    #             (itr + 1) % self.params["video_log_freq"] == 0,
-    #             self.params["video_log_freq"] != -1,
-    #         ])
-
-    #         # decide if metrics should be logged
-    #         self.logmetrics = all([
-    #             (itr + 1) % self.params["scalar_log_freq"] == 0,
-    #             self.params["scalar_log_freq"] != -1,
-    #         ])
-
-    #         reward_logs = self.agent.train_reward()
-    #         policy_logs = self.agent.train_policy()
-
-    #         # log/save
-    #         if self.log_video or self.logmetrics:
-    #             model_dir = os.path.join(self.params['logdir'], f"models_itr_{itr:02d}")
-    #             if not (os.path.exists(model_dir)):
-    #                 os.makedirs(model_dir, exist_ok=True)
-    #             self.agent.reward.save(os.path.join(model_dir, "reward.pt"))
-    #             self.agent.actor.save(os.path.join(model_dir, "SAC"))
-
-    #             # perform logging
-    #             print('\nBeginning logging procedure...')
-    #             self.perform_logging(itr, self.agent.actor, reward_logs, policy_logs)
 
     def training_loop(self):
         self.start_time = time.time()
@@ -260,8 +222,8 @@ class Trainer():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str, default='Pendulum-v1')
-    parser.add_argument('--expert_policy', type=str, default='SAC_Pendulum-v1')        
+    parser.add_argument('--env_name', type=str, default='Reacher-v2')
+    parser.add_argument('--expert_policy', type=str, default='SAC_Reacher-v2')        
     parser.add_argument(
         '--n_iter', '-n', type=int, default=100,
         help='Number of total iterations')
@@ -270,19 +232,15 @@ def main():
         help='Number of expert paths to add to replay buffer'
     )
     parser.add_argument(
-        '--transitions_per_itr', type=int, default=32,
+        '--transitions_per_itr', type=int, default=4,
         help='Number of expert transitions to sample per iteration'
     )
     parser.add_argument(
         '--reward_updates_per_itr', type=int, default=8,
         help='Number of reward updates per iteration'
     )
-    # parser.add_argument(
-    #     '--transitions_per_reward_update', type=int, default=32,
-    #     help='Number of agent transitions per reward update'
-    # )
     parser.add_argument(
-        '--agent_actions_per_demo_transition', type=int, default=4,
+        '--agent_actions_per_demo_transition', type=int, default=2,
         help='Number of agent actions sampled for each expert_transition'
     )
     parser.add_argument(
@@ -292,9 +250,9 @@ def main():
 
     parser.add_argument('--discount', type=float, default=1.0)        
     parser.add_argument('--n_layers', '-l', type=int, default=2)
-    parser.add_argument('--size', '-s', type=int, default=64)
+    parser.add_argument('--size', '-s', type=int, default=256)
     parser.add_argument('--output_size', type=int, default=1)
-    parser.add_argument('--learning_rate', '-lr', type=float, default=0.01)
+    parser.add_argument('--learning_rate', '-lr', type=float, default=0.005)
 
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--no_gpu', '-ngpu', action='store_true')
@@ -326,13 +284,20 @@ def main():
     ###################
     ### RUN TRAINING
     ###################
-
     trainer = Trainer(params)
     trainer.training_loop()
+    # try:
+    #     trainer = Trainer(params)
+    #     trainer.training_loop()
+    # except KeyboardInterrupt:
+    #     keep = input("\nExiting from training early.\nKeep logs & models? ([y]/n)? ")
+    #     if keep.lower() in ["n", "no"]:
+    #         import shutil
+    #         shutil.rmtree(logdir)
 
 if __name__ == '__main__':
     # Allow CUDA in multiprocessing
     # https://pytorch.org/docs/stable/notes/multiprocessing.html#cuda-in-multiprocessing
-    torch.multiprocessing.set_start_method('spawn', force=True)
+    # torch.multiprocessing.set_start_method('spawn', force=True)
     
     main()

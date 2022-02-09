@@ -8,16 +8,16 @@ def build_env(env_name):
     """
     Make env and add env wrappers
     """
-    if env_name == 'Pendulum-v1':
+    if env_name == 'Reacher-v2':
         env = gym.make(env_name)
-        from irl.utils.wrappers import PendulumWrapper
-        env = PendulumWrapper(env)
+        from irl.utils.wrappers import ReacherWrapper
+        env = ReacherWrapper(env)
     else:
         raise ValueError('Environment {} not supported yet ...'.format(env_name))
     return env
 
 def train_policy(env, algo, resume_training, policy_name, 
-                 timesteps=20000):
+                 timesteps=50000):
     """
     Train the expert policy in RL
     """
@@ -56,7 +56,7 @@ def visualize_policy(env, model, num_episodes=10):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str, default='Pendulum-v1')
+    parser.add_argument('--env_name', type=str, default='Reacher-v2')
     parser.add_argument('--algo', type=str, default='SAC')
     parser.add_argument('--resume_training', action='store_true')
     args = parser.parse_args()

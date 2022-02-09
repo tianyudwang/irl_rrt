@@ -11,33 +11,34 @@ from ompl import base as ob
 from ompl import geometric as og
 from ompl import control as oc
 
+import gym
+import torch as th
+# import torch.multiprocessing as mp 
+import irl.planners.control_planner as cp
+import irl.utils.pytorch_util as ptu
+from irl.utils.wrappers import ReacherWrapper
+
 PlannerStatus = {
     'Exact solution': 1,
     'Approximate solution': 2,
 }
 
 
-class PendulumIRLObjective(ob.OptimizationObjective):
-    def __init__(self, si, cost_fn: Callable):
+class ReacherIRLObjective(ob.OptimizationObjective):
+    def __init__(self, si, cost_fn: Callable, goal: np.ndarray):
         super().__init__(si)
         self.cost_fn = cost_fn
-
-        self.s1_data = np.empty(2, dtype=np.float32)
-        self.s2_data = np.empty(2, dtype=np.float32)
+        self.goal = goal
 
     def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
         """Query the neural network cost function for a cost between two states"""
-        self.cp_state_to_data(s1, self.s1_data)
-        self.cp_state_to_data(s2, self.s2_data)
+        s1_np = convert_ompl_state_to_numpy(s1)
+        s2_np = convert_ompl_state_to_numpy(s2)
+        s1_np = np.concatenate([s1_np, self.goal])
+        s2_np = np.concatenate([s2_np, self.goal])
 
-        c = self.cost_fn(self.s1_data, self.s2_data)
+        c = self.cost_fn(s1_np, s2_np)
         return ob.Cost(c)
-
-    def cp_state_to_data(self, state: ob.State, data: np.ndarray):
-        # theta and theta_dot
-        # ob.State is a CompoundState of SO2 and Real       
-        data[0] = state[0].value
-        data[1] = state[1][0]
 
 class MinimumTransitionObjective(ob.PathLengthOptimizationObjective):
     """Minimum number of transitions"""
@@ -48,10 +49,9 @@ class MinimumTransitionObjective(ob.PathLengthOptimizationObjective):
     def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
         return ob.Cost(1.0)
 
-class PendulumShortestDistanceObjective(ob.PathLengthOptimizationObjective):
+class ReacherShortestDistanceObjective(ob.PathLengthOptimizationObjective):
     """
-    Using the cost defined in 
-    https://github.com/openai/gym/blob/44242789179d79fae1d5636fa6db23491a5c422e/gym/envs/classic_control/pendulum.py#L39
+    Cost for a state is its distance to target
     OMPL does not allow control cost, thus ignoring the control effort here
     """
 
@@ -59,9 +59,9 @@ class PendulumShortestDistanceObjective(ob.PathLengthOptimizationObjective):
         super().__init__(si)
 
     def stateCost(self, s: ob.State) -> ob.Cost:
-        th, thdot = s[0].value, s[1][0]
-        assert -np.pi <= th <= np.pi
-        c = th ** 2 + 0.1 * thdot ** 2 
+        target = s[3][:2]
+        finger = s[4][:2]
+        c = np.linalg.norm(target - finger)
         return ob.Cost(c)
 
 def make_RealVectorBounds(
@@ -90,6 +90,8 @@ def make_RealVectorBounds(
         vector_bounds.check()
     return vector_bounds
 
+def convert_ompl_state_to_numpy(state: ob.State) -> np.ndarray:
+    return np.array([state[0].value, state[1].value, state[2][0], state[2][1], state[3][0], state[3][1]])
 
 def path_to_numpy(path: Union[og.PathGeometric, oc.PathControl], dim: int) -> np.ndarray:
     """Convert OMPL path to numpy array"""
@@ -100,58 +102,18 @@ def path_to_numpy(path: Union[og.PathGeometric, oc.PathControl], dim: int) -> np
     ).reshape(-1, dim)
     return states
 
-def controls_to_numpy(controls: List[oc.Control], dim: int) -> np.ndarray:
+def states_to_numpy(states: List[ob.State]) -> np.ndarray:
     """Convert OMPL controls to numpy array"""
-    controls_np = [np.empty(dim) for _ in range(len(controls))]
+    return np.stack([convert_ompl_state_to_numpy(state) for state in states]).astype(np.float32)
+
+def controls_to_numpy(controls: List[oc.Control], dim: int) -> List[np.ndarray]:
+    """Convert OMPL controls to numpy array"""
+    controls_np = np.zeros((len(controls), dim), dtype=np.float32)
     for i in range(len(controls)):
         for j in range(dim):
             controls_np[i][j] = controls[i][j]
     return controls_np
 
-def visualize_path(data: np.ndarray):
-    assert data.shape[1] == 2
-
-    from matplotlib import pyplot as plt
-
-    fig, ax = plt.subplots()
-
-    ax.plot(data[:, 0], data[:, 1], "o-")
-
-    # start
-    ax.plot(
-        data[0, 0], 
-        data[0, 1], 
-        "go", 
-        markersize=10, 
-        markeredgecolor="k", 
-        label="start"
-    )
-
-        # achieved goal
-    ax.plot(
-        data[-1, 0],
-        data[-1, 1],
-        "ro",
-        markersize=10,
-        markeredgecolor="k",
-        label="achieved goal",
-    )
-
-    # desired goal
-    goal = [0, 0]
-    ax.plot(
-        goal[0], 
-        goal[1], 
-        "bo", 
-        markersize=10, 
-        markeredgecolor="k", 
-        label="desired goal"
-    )
-
-    ax.set_xlim(-np.pi, np.pi)
-    ax.set_ylim(-8, 8)
-    plt.legend()
-    plt.show()
 
 #######################################################################
 
@@ -188,43 +150,61 @@ status2color = {
 def color_status(status):
     return colorize(status.asString(), status2color[status.getStatus()])
 
-
 ##################################################################
 
-import torch as th
-import multiprocessing as mp 
-import irl.planners.control_planner as cp
-import irl.utils.pytorch_util as ptu
 
 def plan_from_states(
-        states: th.Tensor,
-        cost_fn: Callable[[np.ndarray], np.ndarray]
-    ) -> List[np.ndarray]:
+    states: th.Tensor,
+    cost_fn: Callable[[np.ndarray], np.ndarray]
+) -> List[th.Tensor]:
     """Construct planner instance for each start location"""
     states = [ptu.to_numpy(state) for state in states]
-    args = [[state, cost_fn] for state in states]
-    with mp.Pool(os.cpu_count()-1) as pool:
-        results = pool.starmap(plan_from_state, args)
-    status, paths, controls = list(zip(*results))
+    # args = [[state, cost_fn] for state in states]
+    # with mp.Pool(os.cpu_count()-1) as pool:
+    #     results = pool.starmap(plan_from_state, args)
+    # status, paths, controls = list(zip(*results))
+    # paths = [ptu.from_numpy(path) for path in paths]
+
+    paths = []
+    for state in states:
+        status, path, control = plan_from_state(state, cost_fn)
+        paths.append(path)
     paths = [ptu.from_numpy(path) for path in paths]
     return paths
 
 def plan_from_state(
-        state: np.ndarray,
-        cost_fn: Callable[[np.ndarray], np.ndarray]
-    ) -> Tuple[str, np.ndarray, np.ndarray]:
-    planner = cp.PendulumSSTPlanner()
-    planner.update_ss_cost(cost_fn)
-    status, path, control = planner.plan(state)
-    assert status in PlannerStatus.keys(), f"Planner status {status}"
+    state: np.ndarray,
+    cost_fn: Callable[[np.ndarray], np.ndarray]
+) -> Tuple[str, np.ndarray, np.ndarray]:
+    # Construct env and planner
+    start, goal = state[:6].astype(np.float64), state[6:].astype(np.float64)
+
+    env = ReacherWrapper(gym.make("Reacher-v2"))
+    planner = cp.ReacherSSTPlanner(env)
+    planner.update_ss_cost(cost_fn, goal)
+
+    status, path, control = planner.plan(start, goal)
+    assert status in PlannerStatus.keys(), f"Planner failed with status {status}"
+    assert len(path) == len(control) + 1, (
+        f"Path length {len(path)} does not match control length {len(control)}"
+    )
+
+    # Need to pad target position back to each state
+    path = np.concatenate((
+        path,
+        np.repeat(goal.reshape(1, -1), len(path), axis=0)
+    ), axis=1)
+    assert path.shape[1] == state.shape[0]
     return status, path, control
 
 def add_states_to_paths(
-        states: th.Tensor, 
-        paths: th.Tensor
-    ) -> List[th.Tensor]:
+    states: th.Tensor, 
+    paths: th.Tensor
+) -> List[th.Tensor]:
     """Add initial states to path"""
-    assert len(states) == len(paths), "Lengths of state and paths are not equal"
+    assert len(states) == len(paths), (
+        f"Lengths of state {len(states)} and paths {len(paths)} are not equal"
+    )
     padded_paths = [
         th.cat((state.reshape(1, -1), path), dim=0) 
         for state, path in zip(states, paths)
