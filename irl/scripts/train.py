@@ -82,7 +82,7 @@ class Trainer():
         rng = np.random.RandomState(seed)
         env_seed = rng.randint(0, (1 << 31) - 1)
         self.env = ReacherWrapper(gym.make(self.params['env_name']))
-        print(env_seed)
+        print(f"Using environment seed: {env_seed}")
         self.env.seed(int(env_seed))
 
     def init_agent(self):
@@ -112,7 +112,6 @@ class Trainer():
             self.check_log(itr)
 
             reward_logs, policy_logs = self.agent.train()
-
 
             # log/save
             if self.log_video or self.logmetrics:
@@ -232,7 +231,7 @@ def main():
         help='Number of expert paths to add to replay buffer'
     )
     parser.add_argument(
-        '--transitions_per_itr', type=int, default=4,
+        '--transitions_per_itr', type=int, default=32,
         help='Number of expert transitions to sample per iteration'
     )
     parser.add_argument(
@@ -240,7 +239,7 @@ def main():
         help='Number of reward updates per iteration'
     )
     parser.add_argument(
-        '--agent_actions_per_demo_transition', type=int, default=2,
+        '--agent_actions_per_demo_transition', type=int, default=1,
         help='Number of agent actions sampled for each expert_transition'
     )
     parser.add_argument(

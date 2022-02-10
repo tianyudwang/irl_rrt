@@ -124,6 +124,19 @@ def check_demo_performance(paths):
     print(f"Demonstration length {np.mean(lens):.2f} +/- {np.std(lens):.2f}")
     print(f"Demonstration return {np.mean(returns):.2f} +/- {np.std(returns):.2f}")
 
+    # For Reacher-v2, check angular velocity is in range [-10, 10]
+    states = np.concatenate([path.states for path in paths], axis=0)
+    states_min = np.amin(states, axis=0)
+    states_max = np.amax(states, axis=0)
+
+    assert ((states_min[2:4] >= np.array([-10, -10])).all() and 
+        (states_max[2:4] <= np.array([10, 10])).all()), (
+        "Demonstrations angular velocity not in range [-10, 10], need to rerun collection"
+    ) 
+
+
+
+
 # def pad_absorbing_states(paths, horizon=100):
 #     """
 #     Add absorbing states to trajectories to make the same length

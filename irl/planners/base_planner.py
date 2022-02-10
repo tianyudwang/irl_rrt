@@ -81,8 +81,8 @@ class ReacherBasePlanner:
         joint_thdot_space.setBounds(
             planner_utils.make_RealVectorBounds(
                 dim=2,
-                low=np.array([-10., -10.]),
-                high=np.array([10., 10.])
+                low=np.array([-15., -15.]),
+                high=np.array([15., 15.])
             )
         )
 

@@ -14,6 +14,7 @@ from ompl import control as oc
 import gym
 import torch as th
 # import torch.multiprocessing as mp 
+import irl.planners.geometric_planner as gp
 import irl.planners.control_planner as cp
 import irl.utils.pytorch_util as ptu
 from irl.utils.wrappers import ReacherWrapper
@@ -179,15 +180,16 @@ def plan_from_state(
     # Construct env and planner
     start, goal = state[:6].astype(np.float64), state[6:].astype(np.float64)
 
-    env = ReacherWrapper(gym.make("Reacher-v2"))
-    planner = cp.ReacherSSTPlanner(env)
+    # env = ReacherWrapper(gym.make("Reacher-v2"))
+    # planner = cp.ReacherSSTPlanner(env)
+    planner = gp.ReacherRRTstarPlanner()
     planner.update_ss_cost(cost_fn, goal)
 
     status, path, control = planner.plan(start, goal)
     assert status in PlannerStatus.keys(), f"Planner failed with status {status}"
-    assert len(path) == len(control) + 1, (
-        f"Path length {len(path)} does not match control length {len(control)}"
-    )
+    # assert len(path) == len(control) + 1, (
+    #     f"Path length {len(path)} does not match control length {len(control)}"
+    # )
 
     # Need to pad target position back to each state
     path = np.concatenate((

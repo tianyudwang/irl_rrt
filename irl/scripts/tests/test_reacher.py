@@ -60,9 +60,11 @@ def test_reacher_RRTstar_planner():
     planner = gp.ReacherRRTstarPlanner()
     for _ in range(10):
         obs = env.reset()
-        state = obs[:-2]
-        target = obs[-2:]
-        status, states, controls = planner.plan(start=state, goal=target)
+        start = obs[:-2].astype(np.float64)
+        target = obs[-2:].astype(np.float64)
+        status, states, controls = planner.plan(start=start, goal=target)
+
+        print(len(states))
 
         finger_pos = states[-1][-2:]
         dist = np.linalg.norm(target - finger_pos)
@@ -86,8 +88,8 @@ def test_reacher_SST_planner():
         print(obs)
         qpos = env.unwrapped.sim.data.qpos.flat[:]
         qvel = env.unwrapped.sim.data.qvel.flat[:]
-        start = obs[:-2]
-        target = obs[-2:]
+        start = obs[:-2].astype(np.float64)
+        target = obs[-2:].astype(np.float64)
         status, states, controls = planner.plan(start=start, goal=target)
 
         print(len(states), len(controls))
@@ -210,7 +212,7 @@ if __name__ == '__main__':
     # for i in range(10):
         # test_no_reward(i)
         # test_env(i)
-    # test_reacher_RRTstar_planner()
-    test_reacher_SST_planner()
+    test_reacher_RRTstar_planner()
+    # test_reacher_SST_planner()
     # test_planner()
     # test_reacher_StatePropagator()

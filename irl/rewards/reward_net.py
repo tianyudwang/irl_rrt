@@ -177,8 +177,12 @@ class RewardNet(nn.Module):
             agent_log_prob = th.stack([log_probs[i] for log_probs in agent_log_probs_l])
 
             assert agent_Q.shape == agent_log_prob.shape
-            agent_Q = th.log(th.mean((th.exp(agent_Q - agent_log_prob)), dim=0, keepdim=True))
+            agent_Q = th.mean(agent_Q, dim=0, keepdim=True)
+            # agent_Q = th.log(th.mean((th.exp(agent_Q - agent_log_prob)), dim=0, keepdim=True))
 
+            print(f"demo_Q: {ptu.to_numpy(demo_Q)}")
+            print(f"agent_Q: {ptu.to_numpy(agent_Q)}")
+            print(f"agent_log_prob: {ptu.to_numpy(agent_log_prob)}")
             demo_Qs.append(demo_Q)
             agent_Qs.append(agent_Q)
         

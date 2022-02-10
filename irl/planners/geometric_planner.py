@@ -58,7 +58,7 @@ class ReacherGeometricPlanner(ReacherBasePlanner):
         if bool(status):
             # Retrieve path
             geometric_path = self.ss.getSolutionPath()
-            geometric_path.interpolate()
+            # geometric_path.interpolate()
             states = geometric_path.getStates()
             print(
                 f"{msg}: "
@@ -77,7 +77,7 @@ class ReacherRRTstarPlanner(ReacherGeometricPlanner):
         super().__init__()
 
         self.planner = og.RRTstar(self.si)
-        self.planner.setRange(0.05)        
+        self.planner.setRange(1.0)        
         self.ss.setPlanner(self.planner)
 
 class ReacherPRMstarPlanner(ReacherGeometricPlanner):
@@ -86,5 +86,5 @@ class ReacherPRMstarPlanner(ReacherGeometricPlanner):
 
         self.planner = og.LazyPRMstar(self.si)
         #TODO: check planner range for PRM and PRMstar
-        self.planner.setRange(0.05)
+        self.planner.setRange(0.5)
         self.ss.setPlanner(self.planner)
