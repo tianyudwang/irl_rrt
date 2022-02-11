@@ -170,26 +170,24 @@ class RewardNet(nn.Module):
         ) -> Dict[str, float]:
         """Optimize reward neural network"""
 
-        demo_Qs, agent_Qs = [], []
+        demo_Qs, agent_Qs, agent_lse_Qs = [], [], []
         for i in range(len(demo_paths)):
             demo_Q = self.compute_Q(demo_paths[i])
             agent_Q = th.cat([self.compute_Q(paths[i]) for paths in agent_paths_l])
             agent_log_prob = th.stack([log_probs[i] for log_probs in agent_log_probs_l])
 
             assert agent_Q.shape == agent_log_prob.shape
-            agent_Q = th.mean(agent_Q, dim=0, keepdim=True)
-            # agent_Q = th.log(th.mean((th.exp(agent_Q - agent_log_prob)), dim=0, keepdim=True))
+            # agent_Q = th.mean(agent_Q, dim=0, keepdim=True)
+            agent_lse_Q = th.log(th.mean((th.exp(agent_Q - agent_log_prob)), dim=0, keepdim=True))
 
-            print(f"demo_Q: {ptu.to_numpy(demo_Q)}")
-            print(f"agent_Q: {ptu.to_numpy(agent_Q)}")
-            print(f"agent_log_prob: {ptu.to_numpy(agent_log_prob)}")
             demo_Qs.append(demo_Q)
             agent_Qs.append(agent_Q)
+            agent_lse_Qs.append(agent_lse_Q)
         
         # Reward loss
         demo_Qs = th.mean(th.cat(demo_Qs, dim=0))
-        agent_Qs = th.mean(th.cat(agent_Qs, dim=0))
-        reward_loss = demo_Qs - agent_Qs
+        agent_Qs = th.mean(th.cat(agent_lse_Qs, dim=0))
+        reward_loss = - demo_Qs + agent_Qs
 
         # Regularization loss
         demo_lcr_loss = [self.lcr_regularizer(path) for path in demo_paths]
@@ -197,8 +195,8 @@ class RewardNet(nn.Module):
             self.lcr_regularizer(path) for agent_paths in agent_paths_l 
             for path in agent_paths 
         ]
-        demo_lcr_loss = th.mean(th.cat(demo_lcr_loss, dim=0))
-        agent_lcr_loss = th.mean(th.cat(agent_lcr_loss, dim=0))
+        demo_lcr_loss = th.sum(th.cat(demo_lcr_loss, dim=0))
+        agent_lcr_loss = th.sum(th.cat(agent_lcr_loss, dim=0))
 
         loss = reward_loss + demo_lcr_loss + agent_lcr_loss
 
@@ -207,9 +205,9 @@ class RewardNet(nn.Module):
         self.optimizer.step()
 
         train_reward_log = {
-            "Reward/demo_Q": ptu.to_numpy(demo_Qs),
-            "Reward/agent_Q": ptu.to_numpy(agent_Qs),
-            "Reward/agent_log_prob": ptu.to_numpy(th.mean(th.cat(agent_log_probs_l))),
+            "Reward/demo_Q": np.mean(ptu.to_numpy(demo_Qs)),
+            "Reward/agent_Q": np.mean(ptu.to_numpy(agent_Qs)),
+            "Reward/agent_log_prob": np.mean(ptu.to_numpy(th.cat(agent_log_probs_l))),
             "Reward/reward_loss": ptu.to_numpy(reward_loss), 
             "Reward/demo_lcr_loss": ptu.to_numpy(demo_lcr_loss),
             "Reward/agent_lcr_loss": ptu.to_numpy(agent_lcr_loss),

@@ -112,6 +112,7 @@ class IRL_Agent(BaseAgent):
 
         # Optimize reward
         reward_logs = self.reward.update(demo_paths, agent_paths_l, agent_log_probs_l)
+        reward_logs = self.reward.update(demo_paths, agent_paths_l, agent_log_probs_l)
         # reward_logs = {"Reward/loss": 0}
 
         # Optimize policy
