@@ -64,8 +64,6 @@ def test_reacher_RRTstar_planner():
         target = obs[-2:].astype(np.float64)
         status, states, controls = planner.plan(start=start, goal=target)
 
-        print(len(states))
-
         finger_pos = states[-1][-2:]
         dist = np.linalg.norm(target - finger_pos)
         assert dist <= 0.05, (
@@ -73,6 +71,31 @@ def test_reacher_RRTstar_planner():
             f"Distance to target is {dist}"
         )
 
+def test_reacher_PRMstar_planner():
+
+    env_name = "Reacher-v2"
+    env = gym.make(env_name)
+    env = ReacherWrapper(env)
+
+    planner = gp.ReacherPRMstarPlanner()
+    for _ in range(10):
+        obs = env.reset()
+        start = obs[:-2].astype(np.float64)
+        target = obs[-2:].astype(np.float64)
+        status, states, controls = planner.plan(start=start, goal=target)
+
+        print(start, states[0])
+        print(f"Start state distance {np.linalg.norm(states[0] - start):.2f}")
+
+        finger_pos = states[-1][-2:]
+        dist = np.linalg.norm(target - finger_pos)
+        print(f"Final state fingertip dist {dist:.2f}")
+        # if dist >= 0.02:
+        #     import ipdb; ipdb.set_trace()
+        # assert dist <= 0.05, (
+        #     f"Reacher finger position {states[-1]} does not reach target at {target}",
+        #     f"Distance to target is {dist}"
+        # )
 
 def test_reacher_SST_planner():
     """
@@ -213,6 +236,7 @@ if __name__ == '__main__':
         # test_no_reward(i)
         # test_env(i)
     test_reacher_RRTstar_planner()
+    # test_reacher_PRMstar_planner()
     # test_reacher_SST_planner()
     # test_planner()
     # test_reacher_StatePropagator()

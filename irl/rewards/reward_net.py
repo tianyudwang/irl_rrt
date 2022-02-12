@@ -163,11 +163,11 @@ class RewardNet(nn.Module):
 
 
     def update(
-            self,
-            demo_paths: List[th.Tensor],
-            agent_paths_l: List[List[th.Tensor]],
-            agent_log_probs_l: List[th.Tensor]
-        ) -> Dict[str, float]:
+        self,
+        demo_paths: List[th.Tensor],
+        agent_paths_l: List[List[th.Tensor]],
+        agent_log_probs_l: List[th.Tensor]
+    ) -> Dict[str, float]:
         """Optimize reward neural network"""
 
         demo_Qs, agent_Qs, agent_lse_Qs = [], [], []
@@ -237,9 +237,9 @@ class RewardNet(nn.Module):
     #     return Q
 
     def compute_Q(
-            self, 
-            path: th.Tensor
-        ) -> th.Tensor:
+        self, 
+        path: th.Tensor
+    ) -> th.Tensor:
         """Compute the Q value of a path"""
         states, next_states = path[:-1], path[1:]
         reward = self(self.model, states, next_states)

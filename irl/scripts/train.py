@@ -251,7 +251,7 @@ def main():
     parser.add_argument('--n_layers', '-l', type=int, default=2)
     parser.add_argument('--size', '-s', type=int, default=256)
     parser.add_argument('--output_size', type=int, default=1)
-    parser.add_argument('--learning_rate', '-lr', type=float, default=0.005)
+    parser.add_argument('--learning_rate', '-lr', type=float, default=0.01)
 
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--no_gpu', '-ngpu', action='store_true')

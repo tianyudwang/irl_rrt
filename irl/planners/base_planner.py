@@ -18,7 +18,7 @@ class ReacherGoalState(ob.GoalState):
         self, 
         si: ob.SpaceInformation,
         goal: np.ndarray,
-        threshold: Optional[float] = 0.02
+        threshold: Optional[float] = 0.01
     ):
         super().__init__(si)
         self.goal = goal
@@ -66,7 +66,7 @@ class ReacherBasePlanner:
         self.state_dim = 6
         # 2 joint torque
         self.control_dim = 2
-        ou.setLogLevel(ou.LogLevel.LOG_ERROR)
+        ou.setLogLevel(ou.LogLevel.LOG_INFO)
 
     def get_StateSpace(self) -> ob.StateSpace:
         """
@@ -125,7 +125,7 @@ class ReacherBasePlanner:
         if isinstance(start, np.ndarray):
             assert start.ndim == 1
         start_state = ob.State(self.space)
-        for i in range(4):
+        for i in range(len(start)):
             # * Copy an element of an array to a standard Python scalar
             # * to ensure C++ can recognize it.
             start_state[i] = start[i]
