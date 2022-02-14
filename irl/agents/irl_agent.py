@@ -96,14 +96,14 @@ class IRL_Agent(BaseAgent):
         # self.reward.model_cpu.eval()
 
         # Plan optimal paths from next states to goal under current reward function        
-        demo_paths = planner_utils.plan_from_states(demo_next_states, self.reward.cost_fn)
+        # demo_paths = planner_utils.plan_from_states(demo_next_states, self.reward.cost_fn)
         agent_paths_l = [
             planner_utils.plan_from_states(agent_next_states, self.reward.cost_fn) 
             for agent_next_states in agent_next_states_l
         ]
 
         # Add first state back to each path
-        demo_paths = planner_utils.add_states_to_paths(demo_states, demo_paths)
+        # demo_paths = planner_utils.add_states_to_paths(demo_states, demo_paths)
         agent_paths_l = [
             planner_utils.add_states_to_paths(demo_states, agent_paths)
             for agent_paths in agent_paths_l

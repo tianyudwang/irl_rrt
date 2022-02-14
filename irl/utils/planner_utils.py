@@ -66,7 +66,7 @@ class ReacherShortestDistanceObjective(ob.PathLengthOptimizationObjective):
 
     def stateCost(self, s: ob.State) -> ob.Cost:
         fingertip = np.array([s[3][0], s[3][1]], dtype=np.float32)
-        c = np.linalg.norm(self.target - fingertip)
+        c = np.linalg.norm(self.target - fingertip).item()
         return ob.Cost(c)
 
 def make_RealVectorBounds(
