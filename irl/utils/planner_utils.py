@@ -26,17 +26,17 @@ PlannerStatus = {
 
 
 class ReacherIRLObjective(ob.OptimizationObjective):
-    def __init__(self, si, cost_fn: Callable, goal: np.ndarray):
+    def __init__(self, si, cost_fn: Callable, target: np.ndarray):
         super().__init__(si)
         self.cost_fn = cost_fn
-        self.goal = goal
+        self.target = target
 
     def motionCost(self, s1: ob.State, s2: ob.State) -> ob.Cost:
         """Query the neural network cost function for a cost between two states"""
         s1_np = convert_ompl_state_to_numpy(s1)
         s2_np = convert_ompl_state_to_numpy(s2)
-        s1_np = np.concatenate([s1_np, self.goal])
-        s2_np = np.concatenate([s2_np, self.goal])
+        s1_np = np.concatenate([s1_np, self.target])
+        s2_np = np.concatenate([s2_np, self.target])
 
         c = self.cost_fn(s1_np, s2_np)
         return ob.Cost(c)
@@ -56,20 +56,24 @@ class ReacherShortestDistanceObjective(ob.PathLengthOptimizationObjective):
     OMPL does not allow control cost, thus ignoring the control effort here
     """
 
-    def __init__(self, si: Union[oc.SpaceInformation, ob.SpaceInformation]):
+    def __init__(
+        self, 
+        si: Union[oc.SpaceInformation, ob.SpaceInformation],
+        target: np.ndarray
+    ):
         super().__init__(si)
+        self.target = target
 
     def stateCost(self, s: ob.State) -> ob.Cost:
-        target = s[3][:2]
-        finger = s[4][:2]
-        c = np.linalg.norm(target - finger)
+        fingertip = np.array([s[3][0], s[3][1]], dtype=np.float32)
+        c = np.linalg.norm(self.target - fingertip)
         return ob.Cost(c)
 
 def make_RealVectorBounds(
-        dim: int, 
-        low: np.ndarray, 
-        high: np.ndarray
-    ) -> ob.RealVectorBounds:
+    dim: int, 
+    low: np.ndarray, 
+    high: np.ndarray
+) -> ob.RealVectorBounds:
     assert isinstance(dim, int), "dim must be an integer"
     # *OMPL's python binding might not recognize numpy array. convert to list to make it work
     if isinstance(low, np.ndarray):
@@ -178,14 +182,14 @@ def plan_from_state(
     cost_fn: Callable[[np.ndarray], np.ndarray]
 ) -> Tuple[str, np.ndarray, np.ndarray]:
     # Construct env and planner
-    start, goal = state[:6].astype(np.float64), state[6:].astype(np.float64)
+    start, target = state[:6].astype(np.float64), state[6:].astype(np.float64)
 
     # env = ReacherWrapper(gym.make("Reacher-v2"))
     # planner = cp.ReacherSSTPlanner(env)
     planner = gp.ReacherRRTstarPlanner()
-    planner.update_ss_cost(cost_fn, goal)
+    planner.update_ss_cost(cost_fn, target)
 
-    status, path, control = planner.plan(start, goal)
+    status, path, control = planner.plan(start, target)
     assert status in PlannerStatus.keys(), f"Planner failed with status {status}"
     # assert len(path) == len(control) + 1, (
     #     f"Path length {len(path)} does not match control length {len(control)}"
@@ -194,7 +198,7 @@ def plan_from_state(
     # Need to pad target position back to each state
     path = np.concatenate((
         path,
-        np.repeat(goal.reshape(1, -1), len(path), axis=0)
+        np.repeat(target.reshape(1, -1), len(path), axis=0)
     ), axis=1)
     assert path.shape[1] == state.shape[0]
     return status, path, control

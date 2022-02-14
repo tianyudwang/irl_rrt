@@ -15,23 +15,55 @@ from irl.planners import geometric_planner as gp
 from irl.planners import control_planner as cp
 
 
-np.set_printoptions(precision=3)
+np.set_printoptions(precision=6)
 
+def test_reacher_next_state():
+    env = gym.make("Reacher-v2")
+    env = ReacherWrapper(env)
+
+    # Check if next state is the same given the same current state and action
+    # MUST copy qpos and qvel
+    env.reset()
+    qpos = env.unwrapped.sim.data.qpos.ravel()[:].copy()
+    qvel = env.unwrapped.sim.data.qvel.ravel()[:].copy()
+
+    action = env.action_space.sample()
+    states_before, states_after = [], []
+    n_states = 1000
+    
+    for i in range(n_states):
+        env.reset()
+        env.set_state(qpos, qvel)
+        states_before.append(env._get_obs())
+        states_after.append(env.step(action)[0])
+
+    states_before = np.stack(states_before)
+    states_after = np.stack(states_after)
+    states_before_diff = np.linalg.norm(states_before - np.mean(states_before, axis=0)) / n_states
+    states_after_diff = np.linalg.norm(states_after - np.mean(states_after, axis=0)) / n_states
+
+    assert states_before_diff < 1e-6, (
+        f"State difference: {states_before_diff:.8f}")
+    assert states_after_diff < 1e-6, (
+        f"Next state difference: {states_after_diff:.8f}")
 
 def test_reacher_StatePropagator():
     env = gym.make("Reacher-v2")
     env = ReacherWrapper(env)
 
+    # Sample random state and next state from env and compare to ompl propagate function
     planner = cp.ReacherSSTPlanner(env.unwrapped)
     state_propagator = planner.state_propagator
 
     for i in range(1000):
         # gym step
         obs = env.reset()
-        gym_state_before = obs[:6]
+        qpos = env.unwrapped.sim.data.qpos.ravel()[:].copy()
+        qvel = env.unwrapped.sim.data.qvel.ravel()[:].copy()
+        gym_state_before = obs[:6].astype(np.float64)
         action = env.action_space.sample()
         obs, rew, done, info = env.step(action)
-        gym_state_after = obs[:6]   
+        gym_state_after = obs[:6]
 
         # ompl propagate
         state_before = planner.get_StartState(gym_state_before)
@@ -41,15 +73,23 @@ def test_reacher_StatePropagator():
         control[0] = action[0]
         control[1] = action[1]
         state_propagator.propagate(state_before(), control, 2.0, state_after()) 
+        ompl_state_after = planner_utils.convert_ompl_state_to_numpy(state_after())
 
         # compare
-        ompl_state_after = planner_utils.convert_ompl_state_to_numpy(state_after())
-        assert np.linalg.norm(ompl_state_after - gym_state_after) < 1e-2, (
+        assert np.allclose(ompl_state_after, gym_state_after, atol=1e-6), (
             f"States do not match after ompl propagte \n"
-            f"gym state {gym_state_after} \n"
-            f"ompl state {ompl_state_after}"
+            f"obs before {gym_state_before} \n"
+            f"qpos before {qpos} \n"
+            f"qvel before {qvel} \n"
+            f"action {action} \n"
+            f"gym state after {gym_state_after} \n"
+            f"ompl state after {ompl_state_after} \n"
         )
 
+def reacher_cost_fn(s1, s2):
+    assert (s1[-2:] == s2[-2:]).all(), "Target state not equal"
+    cost = np.linalg.norm(s1[:-2] - s2[:-2]) + np.linalg.norm(s2[4:6] - s2[6:8])
+    return cost
 
 def test_reacher_RRTstar_planner():
 
@@ -62,6 +102,7 @@ def test_reacher_RRTstar_planner():
         obs = env.reset()
         start = obs[:-2].astype(np.float64)
         target = obs[-2:].astype(np.float64)
+        planner.update_ss_cost(reacher_cost_fn, target)
         status, states, controls = planner.plan(start=start, goal=target)
 
         finger_pos = states[-1][-2:]
@@ -100,7 +141,9 @@ def test_reacher_PRMstar_planner():
 def test_reacher_SST_planner():
     """
     Path returned by planner does not match exactly the rollout path from controls
+    Major discrepancy in angle and angular velocity in joint1 (the second arm)
     """
+    assert False, "This test function does not work"
     env_name = "Reacher-v2"
     env = gym.make(env_name)
     env = ReacherWrapper(env)
@@ -108,25 +151,24 @@ def test_reacher_SST_planner():
     planner = cp.ReacherSSTPlanner(env.unwrapped)
     for _ in range(10):
         obs = env.reset()
-        print(obs)
-        qpos = env.unwrapped.sim.data.qpos.flat[:]
-        qvel = env.unwrapped.sim.data.qvel.flat[:]
+        qpos = env.unwrapped.sim.data.qpos.flat[:].copy()
+        qvel = env.unwrapped.sim.data.qvel.flat[:].copy()
         start = obs[:-2].astype(np.float64)
         target = obs[-2:].astype(np.float64)
         status, states, controls = planner.plan(start=start, goal=target)
 
-        print(len(states), len(controls))
         finger_pos = states[-1][-2:]
         dist = np.linalg.norm(target - finger_pos)
-        # assert dist <= 0.1, (
-        #     f"Reacher state {states[-1]} does not reach target at {target}",
-        #     f"Distance to target is {dist}"
-        # )
+        assert dist <= 0.01, (
+            f"Reacher state {states[-1]} does not reach target at {target} \n"
+            f"Distance to target is {dist}"
+        )
 
-        obs = env.reset()
+        env.reset()
         env.set_state(qpos, qvel)
-        obs = env._get_obs()
-        print(obs)
+        new_obs = env._get_obs()
+        assert np.allclose(obs, new_obs)
+
         # env.render()
         rollout_states = [obs]
         for j in range(len(controls)):
@@ -136,42 +178,11 @@ def test_reacher_SST_planner():
             rollout_states.append(obs)
         rollout_states = np.array(rollout_states)
 
-        import ipdb; ipdb.set_trace()
         assert len(rollout_states) == len(states)
-        assert np.linalg.norm(rollout_states[:, :6] - states) < 0.1
+        if np.linalg.norm(rollout_states[:, :6] - states) >= 0.1:   
+            import ipdb; ipdb.set_trace()
+        # assert np.linalg.norm(rollout_states[:, :6] - states) < 0.1
 
-
-def test_env(seed):
-
-    env = gym.make("Reacher-v2")
-    env = ReacherWrapper(env)
-
-    rng = np.random.RandomState(seed)
-    env_seed = rng.randint(0, (1 << 31) - 1)
-    env.seed(env_seed)
-
-    import ipdb; ipdb.set_trace()
-
-    nn_params = {
-        'ob_dim': env.observation_space.shape[0],
-        'output_size': 1,
-        'n_layers': 2,
-        'size': 256,
-        'activation': 'relu',
-        'output_activation': 'sigmoid',
-        'learning_rate': 0.003,
-    }
-    reward = RewardNet(nn_params)
-    irl_env = IRLEnv(env, reward)
-
-    tmp_path = f"/tmp/sb3_reacher_random_policy/{seed}"
-    # set up logger
-    new_logger = configure(tmp_path, ["csv", "tensorboard"])
-    model = SAC("MlpPolicy", env, verbose=0, seed=seed)
-    # model.set_logger(new_logger)
-    # model.learn(total_timesteps=30000, log_interval=32)
-
-    eval(env, model)
 
 def eval(env, model):
     rews = []
@@ -192,51 +203,8 @@ def eval(env, model):
     print(f"Episode return {np.mean(returns):.2f} +/- {np.std(returns):.2f}")
     print(f"Episode length {np.mean(lengths):.2f} +/- {np.std(lengths):.2f}")
 
-def test_no_reward(seed):
-    import gym
-
-
-
-    rng = np.random.RandomState(seed)
-    env_seed = rng.randint(0, (1 << 31) - 1)
-    env = gym.make("Reacher-v2")
-
-    import ipdb; ipdb.set_trace()
-    print(env_seed)
-    env.seed(int(env_seed))
-
-    nn_params = {
-        'ob_dim': env.observation_space.shape[0],
-        'output_size': 1,
-        'n_layers': 2,
-        'size': 128,
-        'activation': 'relu',
-        'output_activation': 'sigmoid',
-        'learning_rate': 0.003,
-    }
-    reward = RewardNet(nn_params)
-    irl_env = IRLEnv(env, reward)
-
-    tmp_path = f"/tmp/sb3_reacher_irl_env/{seed}"
-    # set up logger
-    new_logger = configure(tmp_path, ["stdout", "csv", "tensorboard"])
-    model = SAC("MlpPolicy", irl_env, verbose=0)
-    model.set_logger(new_logger)
-    model.learn(total_timesteps=30000, log_interval=32)
-
-    eval(env, model)
-
-    # new_logger = configure(tmp_path, ["stdout", "csv", "tensorboard"])
-    # model = SAC("MlpPolicy", env, verbose=1)
-    # model.set_logger(new_logger)
-    # model.learn(total_timesteps=50000, log_interval=4)
-
 if __name__ == '__main__':
-    # for i in range(10):
-        # test_no_reward(i)
-        # test_env(i)
     test_reacher_RRTstar_planner()
     # test_reacher_PRMstar_planner()
     # test_reacher_SST_planner()
-    # test_planner()
     # test_reacher_StatePropagator()

@@ -66,7 +66,7 @@ class ReacherBasePlanner:
         self.state_dim = 6
         # 2 joint torque
         self.control_dim = 2
-        ou.setLogLevel(ou.LogLevel.LOG_INFO)
+        ou.setLogLevel(ou.LogLevel.LOG_ERROR)
 
     def get_StateSpace(self) -> ob.StateSpace:
         """
@@ -81,8 +81,8 @@ class ReacherBasePlanner:
         joint_thdot_space.setBounds(
             planner_utils.make_RealVectorBounds(
                 dim=2,
-                low=np.array([-15., -15.]),
-                high=np.array([15., 15.])
+                low=np.array([-100., -100.]),
+                high=np.array([100., 100.])
             )
         )
 
@@ -137,8 +137,8 @@ class ReacherBasePlanner:
         # import ipdb; ipdb.set_trace()
         return start_state
 
-    def update_ss_cost(self, cost_fn: Callable, goal: np.ndarray):
+    def update_ss_cost(self, cost_fn: Callable, target: np.ndarray):
         # Set up cost function
-        costObjective = planner_utils.ReacherIRLObjective(self.si, cost_fn, goal)
-        self.ss.setOptimizationObjective(costObjective)
-
+        # self.objective = planner_utils.ReacherIRLObjective(self.si, cost_fn, target)
+        self.objective = planner_utils.ReacherShortestDistanceObjective(self.si, target)
+        self.ss.setOptimizationObjective(self.objective)

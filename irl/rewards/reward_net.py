@@ -88,9 +88,17 @@ class RewardNet(nn.Module):
         return reward.item()
 
     def lcr_regularizer(self, path):
-        states, next_states = path[:-1], path[1:]
-        rewards = self(self.model, states, next_states)
-        lcr = th.sum(th.square(rewards[1:] - rewards[:-1]), dim=0, keepdim=False)
+        """Computes the high-frequency variation in reward function, c.f. GCL"""
+        # Need at least 3 states 
+        if len(path) <= 2:
+            return 0
+        lcr = 0
+        for i in range(1, len(path)-1):
+            sm1, s, sp1 = path[i-1].reshape(1, -1), path[i].reshape(1, -1), path[i+1].reshape(1, -1)
+            lcr += 2 * self(self.model, sm1, sp1) - self(self.model, sm1, s) - self(self.model, s, sp1)
+        # states, next_states = path[:-1], path[1:]
+        # rewards = self(self.model, states, next_states)
+        # lcr = th.sum(th.square(rewards[1:] - rewards[:-1]), dim=0, keepdim=False)
         return lcr
 
 
@@ -101,7 +109,8 @@ class RewardNet(nn.Module):
     #         agent_log_probs: List[np.ndarray],
     #         local_constant_rate: Optional[bool] = True
     #     ) -> Dict[str, float]:
-    #     """Optimize the reward function
+    #     """
+    #     Optimize the reward function
     #     The loss function for reward parameters is
     #     J_r(theta) = E_{(s,a)~D}[Q*(s, a) - log(E_{a'~pi(s)}[e^(Q*(s, a')) / pi(a'|s)])],
     #     which is hard to optimize due to numerical instability in 1 / pi(a'|s)

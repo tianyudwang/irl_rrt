@@ -28,7 +28,7 @@ class ReacherGeometricPlanner(ReacherBasePlanner):
         self.ss.setStateValidityChecker(self.state_validity_checker)
 
         # Define optimization objective
-        self.objective = planner_utils.ReacherShortestDistanceObjective(self.si)
+        self.objective = planner_utils.MinimumTransitionObjective(self.si)
         self.ss.setOptimizationObjective(self.objective)
 
     def plan(
@@ -62,7 +62,7 @@ class ReacherGeometricPlanner(ReacherBasePlanner):
             states = geometric_path.getStates()
             print(
                 f"{msg}: "
-                f"Path length is {geometric_path.length():.2f}, "
+                f"Path length is {len(states)}, "
                 f"cost is {geometric_path.cost(objective).value():.2f}, ",
                 f"solve time is {t:.2f}"
             )
@@ -77,7 +77,7 @@ class ReacherRRTstarPlanner(ReacherGeometricPlanner):
         super().__init__()
 
         self.planner = og.RRTstar(self.si)
-        self.planner.setRange(1.0)        
+        self.planner.setRange(2.0)        
         self.ss.setPlanner(self.planner)
 
 class ReacherPRMstarPlanner(ReacherGeometricPlanner):

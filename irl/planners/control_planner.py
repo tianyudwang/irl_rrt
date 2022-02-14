@@ -64,18 +64,19 @@ class ReacherStatePropagator(oc.StatePropagator):
         self.qpos_temp[0] = state[0].value
         self.qpos_temp[1] = state[1].value
         self.qvel_temp[0] = state[2][0]
-        self.qvel_temp[2] = state[2][1]
+        self.qvel_temp[1] = state[2][1]
         self.ctrl_temp[0] = control[0]
         self.ctrl_temp[1] = control[1]
 
         # ==== Propagate qpos and qvel with given control in Mujoco===
         # assume MinMaxControlDuration = 1 and frame_skip = 2
         self.env.set_state(self.qpos_temp, self.qvel_temp)
-        self.env.do_simulation(self.ctrl_temp, self.env.frame_skip)
+        self.env.step(self.ctrl_temp)
+        # self.env.do_simulation(self.ctrl_temp, self.env.frame_skip)
 
         # ==== Copy Mujoco State to OMPL State ====
-        qpos = self.env.sim.data.qpos.flat[:]
-        qvel = self.env.sim.data.qvel.flat[:]
+        qpos = self.env.sim.data.qpos.flat[:].copy()
+        qvel = self.env.sim.data.qvel.flat[:].copy()
         fingertip = self.env.get_body_com("fingertip")[:2]
 
         result[0].value = qpos[0]
@@ -118,7 +119,7 @@ class ReacherControlPlanner(ReacherBasePlanner):
         self.ss.setStateValidityChecker(self.state_validity_checker)
 
         # Add StatePropagator to SimpleSetup
-        self.si.setMinMaxControlDuration(2, 2)
+        self.si.setMinMaxControlDuration(1, 1)
         self.state_propagator = self.get_StatePropagator(
             self.si, 
             self.state_validity_checker,

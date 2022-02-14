@@ -86,7 +86,7 @@ class ReacherWrapper(gym.Wrapper):
             self.unwrapped.get_body_com("fingertip")[:2],
             self.unwrapped.sim.data.qpos.flat[2:],
         ])
-        return ob.astype(np.float32)
+        return ob.astype(np.float32).copy()
 
     def one_step_transition(self, state, action):
         """Set mujoco simulator to state and apply action to get next state"""
