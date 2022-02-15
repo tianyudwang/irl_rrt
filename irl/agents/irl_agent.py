@@ -241,7 +241,8 @@ class IRL_Agent(BaseAgent):
             action_dist = policy.action_dist.proba_distribution(mean_actions, log_std)
             action = ptu.from_numpy(transition.action).reshape(1, -1)
             log_prob = action_dist.log_prob(action)
-            log_probs.append(ptu.to_numpy(log_prob)[0])
+            log_prob = np.clip(log_prob, -20, 10)
+            log_probs.append(log_prob)
 
         return paths, np.array(log_probs)
 

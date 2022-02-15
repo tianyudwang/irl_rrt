@@ -75,7 +75,7 @@ def action_log_prob(
     policy: Union[OffPolicyAlgorithm, Actor],
     ob: np.ndarray,
     log_min: Optional[float] = -20.0,
-    log_max: Optional[float] = 2.0,
+    log_max: Optional[float] = 10.0,
 ) -> np.ndarray:
     """Query SB3 policy model for action and corresponding log probability"""
     if isinstance(policy, OffPolicyAlgorithm):
@@ -88,8 +88,8 @@ def action_log_prob(
     action, log_prob = policy.action_log_prob(ob)
     action = ptu.to_numpy(action)[0]
     log_prob = ptu.to_numpy(log_prob)[0]
-    # log_prob = np.clip(log_prob, log_min, log_max)
-    # assert log_min <= log_prob <= log_max, f"log_prob {log_prob:.2f} not in bounds"
+    log_prob = np.clip(log_prob, log_min, log_max)
+    assert log_min <= log_prob <= log_max, f"log_prob {log_prob:.2f} not in bounds"
     return action, log_prob
 
 
