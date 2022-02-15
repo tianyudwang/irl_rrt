@@ -219,8 +219,9 @@ class IRL_Agent(BaseAgent):
         env,
         policy,
         batch_size: Optional[int] = 64
-    ) -> List[types.Trajectory]:
-        """Evaluate the policy by setting initial states from replay buffer"""
+    ) -> Tuple[List[types.Trajectory], np.ndarray]:
+        """Evaluate the policy by setting initial states from replay buffer
+        Also check the action log prob"""
         demo_transitions = self.sample_transitions(batch_size)
 
         paths = []
@@ -228,5 +229,19 @@ class IRL_Agent(BaseAgent):
             qpos = transition.info['qpos']
             qvel = transition.info['qvel']
             paths.append(utils.sample_trajectory(env, policy, qpos, qvel))
+            
+        # Compute action log prob on all transitions 
+        assert isinstance(policy, Actor)
+        log_probs = []
+        transitions = self.demo_buffer.transitions
+        # transitions = self.sample_transitions(128)
+        for transition in transitions:
+            obs, _ = policy.obs_to_tensor(transition.state)
+            mean_actions, log_std, kwargs = policy.get_action_dist_params(obs)
+            action_dist = policy.action_dist.proba_distribution(mean_actions, log_std)
+            action = ptu.from_numpy(transition.action).reshape(1, -1)
+            log_prob = action_dist.log_prob(action)
+            log_probs.append(ptu.to_numpy(log_prob)[0])
 
-        return paths
+        return paths, np.array(log_probs)
+

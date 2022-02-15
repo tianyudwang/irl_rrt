@@ -112,6 +112,7 @@ class Trainer():
             self.check_log(itr)
 
             reward_logs, policy_logs = self.agent.train()
+            # reward_logs, policy_logs = {'Reward/loss': 0}, {'Policy/loss': 0}
 
             # log/save
             if self.log_video or self.logmetrics:
@@ -175,9 +176,10 @@ class Trainer():
             self.params['eval_batch_size']
         )  
 
-        eval_paths_replay_buffer = self.agent.eval_on_replay_buffer(
+        paths_replay_buffer, log_probs_replay_buffer = self.agent.eval_on_replay_buffer(
             self.env, eval_policy, self.params['eval_batch_size']
         )
+
 
         # save eval rollouts as videos in tensorboard event file
         if self.log_video and train_video_paths != None:
@@ -198,8 +200,8 @@ class Trainer():
         if self.logmetrics:
             # returns, for logging
             eval_returns = [path.rewards.sum() for path in eval_paths]
-            eval_replay_buffer_returns = [path.rewards.sum() for path in eval_paths_replay_buffer]
-
+            replay_buffer_returns = [path.rewards.sum() for path in eval_paths_replay_buffer]
+            
             # episode lengths, for logging
             eval_ep_lens = [len(path) for path in eval_paths]
 
@@ -211,10 +213,15 @@ class Trainer():
             logs["Eval/MinReturn"] = np.min(eval_returns)
             logs["Eval/AverageEpLen"] = np.mean(eval_ep_lens)
 
-            logs["Eval/AverageReturn_buffer"] = np.mean(eval_replay_buffer_returns)
-            logs["Eval/StdReturn_buffer"] = np.std(eval_replay_buffer_returns)
-            logs["Eval/MaxReturn_buffer"] = np.max(eval_replay_buffer_returns)
-            logs["Eval/MinReturn_buffer"] = np.min(eval_replay_buffer_returns)
+            logs["ReplayBuffer/AverageReturn"] = np.mean(eval_replay_buffer_returns)
+            logs["ReplayBuffer/StdReturn"] = np.std(eval_replay_buffer_returns)
+            logs["ReplayBuffer/MaxReturn"] = np.max(eval_replay_buffer_returns)
+            logs["ReplayBuffer/MinReturn"] = np.min(eval_replay_buffer_returns)
+
+            logs["ReplayBuffer/Mean_logprob"] = np.mean(log_probs_replay_buffer)
+            logs["ReplayBuffer/Std_logprob"] = np.std(log_probs_replay_buffer)
+            logs["ReplayBuffer/Max_logprob"] = np.max(log_probs_replay_buffer)
+            logs["ReplayBuffer/Min_logprob"] = np.min(log_probs_replay_buffer)
 
             logs["TimeSinceStart"] = time.time() - self.start_time
             logs.update(reward_logs)

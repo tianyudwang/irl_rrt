@@ -4,7 +4,9 @@ import time
 import gym
 import numpy as np
 
+from stable_baselines3.sac.policies import Actor
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
+from stable_baselines3.common.policies import BaseModel
 from irl.utils import pytorch_util as ptu
 from irl.utils import types
 
@@ -22,7 +24,7 @@ def sample_trajectory(
     """
 
     # init vars
-    obs, acs, rewards, next_obs, terminals = [], [], [], [], []
+    obs, acs, log_probs, rewards, next_obs, terminals = [], [], [], [], [], []
     env.reset()
     ob, rew, done, info = env.step(env.action_space.sample())
     infos = {}
@@ -30,6 +32,7 @@ def sample_trajectory(
         infos[key] = []
 
     # initialize env for the beginning of a new rollout
+    # reset to given mujoco state is qpos, qvel are provided
     ob = env.reset() 
     if qpos is not None and qvel is not None:
         env.set_state(qpos, qvel)
@@ -37,9 +40,10 @@ def sample_trajectory(
     while True:
         # use the most recent ob to decide what to do
         obs.append(ob.copy())
-        ac, _ = policy.predict(ob, deterministic=False)        
+        # ac, _ = policy.predict(ob, deterministic=False)        
+        ac, log_prob = action_log_prob(policy, ob)
         acs.append(ac)
-        # log_probs.append(log_prob)
+        log_probs.append(log_prob)
 
         # take that action and record results
         ob, rew, done, info = env.step(ac)
@@ -62,26 +66,30 @@ def sample_trajectory(
         states=np.array(obs), 
         actions=np.array(acs), 
         rewards=np.array(rewards),
-        infos=infos
+        infos=infos,
+        log_probs=np.array(log_probs)
     )
 
 
 def action_log_prob(
-    policy: OffPolicyAlgorithm,
+    policy: Union[OffPolicyAlgorithm, Actor],
     ob: np.ndarray,
     log_min: Optional[float] = -20.0,
     log_max: Optional[float] = 2.0,
 ) -> np.ndarray:
     """Query SB3 policy model for action and corresponding log probability"""
-    assert isinstance(policy, OffPolicyAlgorithm), (
-        f"Policy type {type(policy)} is not OffPolicyAlgorithm"
-    )
-    ob, _ = policy.policy.obs_to_tensor(ob)
-    action, log_prob = policy.actor.action_log_prob(ob)
+    if isinstance(policy, OffPolicyAlgorithm):
+        policy = policy.policy.actor
+    elif isinstance(policy, Actor):
+        pass
+    else:
+        raise ValueError(f"Policy type {type(policy)} is not implemented")
+    ob, _ = policy.obs_to_tensor(ob)
+    action, log_prob = policy.action_log_prob(ob)
     action = ptu.to_numpy(action)[0]
     log_prob = ptu.to_numpy(log_prob)[0]
-    log_prob = np.clip(log_prob, log_min, log_max)
-    assert log_min <= log_prob <= log_max, f"log_prob {log_prob:.2f} not in bounds"
+    # log_prob = np.clip(log_prob, log_min, log_max)
+    # assert log_min <= log_prob <= log_max, f"log_prob {log_prob:.2f} not in bounds"
     return action, log_prob
 
 

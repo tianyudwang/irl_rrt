@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Optional
 import numpy as np
 import torch as th
 
@@ -17,6 +17,9 @@ class Trajectory:
     """Infos, shape (trajectory_len, val_dim)
     For Reacher-v2, we store the qpos and qvel for the next_state
     """
+
+    log_probs: np.ndarray
+    """Action log probabilities, shape (trajectory_len, )."""
 
     def __len__(self):
         """Returns number of transitions, equal to the number of actions."""
@@ -36,6 +39,12 @@ class Trajectory:
             if len(val) != len(self.actions):
                 print(val.shape)
                 raise ValueError(f"Infos shape {len(val)} does not match actions {len(self.actions)}")
+
+        if  len(self.log_probs) != len(self.actions):
+            raise ValueError(
+                f"Action log_probs shape {len(self.log_probs)} does not match actions {len(self.actions)}"
+            )
+
 
 @dataclass(frozen=True)
 class TrajectoryWithReward(Trajectory):
@@ -69,6 +78,9 @@ class Transition:
     info: Dict[str, np.ndarray]
     """For Reacher-v2, info contains qpos and qvel for next state"""
 
+    log_prob: Optional[np.ndarray]
+    """Action log probability, shape (1, ) """
+
     def __len__(self):
         """Length of a transition is always 1"""
         return 1
@@ -95,7 +107,19 @@ def convert_trajectories_to_transitions(trajectories: List[Trajectory]) -> List[
             info = {}
             for key, val in traj.infos.items():
                 info[key] = val[i]
-            transition = Transition(traj.states[i], traj.actions[i], traj.states[i+1], info)
+
+            if traj.log_probs is None:
+                log_prob = None
+            else:
+                log_prob = traj.log_probs[i]
+            
+            transition = Transition(
+                state=traj.states[i], 
+                action=traj.actions[i], 
+                next_state=traj.states[i+1], 
+                info=info,
+                log_prob=log_prob
+            )
             transitions.append(transition)
 
     assert len(transitions) == sum([len(traj) for traj in trajectories]), (
