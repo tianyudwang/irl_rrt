@@ -72,6 +72,10 @@ class ReacherWrapper(gym.Wrapper):
     def step(self, action):
         ob, rew, done, info = super().step(action)
         ob = self._get_obs()
+        info = {
+            'qpos': self.unwrapped.sim.data.qpos.flat[:].copy(),
+            'qvel': self.unwrapped.sim.data.qvel.flat[:].copy()
+        }
         return ob, rew, done, info
 
     def reset(self):

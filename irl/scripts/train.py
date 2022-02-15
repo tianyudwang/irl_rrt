@@ -126,8 +126,6 @@ class Trainer():
                 self.perform_logging(itr, self.agent.policy, reward_logs, policy_logs)
 
 
-
-
     def check_log(self, itr):
         """Decide if we need to log metrics in this iteration"""
         # decide if videos should be rendered/logged at this iteration
@@ -144,10 +142,10 @@ class Trainer():
 
 
     def collect_demo_trajectories(
-            self, 
-            expert_policy: str, 
-            batch_size: int 
-        ):
+        self, 
+        expert_policy: str, 
+        batch_size: int 
+    ):
         """
         :param expert_policy:  relative path to saved expert policy
         :return:
@@ -163,6 +161,7 @@ class Trainer():
         return demo_paths
 
 
+
     def perform_logging(self, itr, eval_policy, reward_logs, policy_logs):
 
         last_log = reward_logs
@@ -173,8 +172,12 @@ class Trainer():
         print("\nCollecting data for eval...")
         eval_paths = utils.sample_trajectories(
             self.env, eval_policy, 
-            self.params['eval_batch_size'], render=False
+            self.params['eval_batch_size']
         )  
+
+        eval_paths_replay_buffer = self.agent.eval_on_replay_buffer(
+            self.env, eval_policy, self.params['eval_batch_size']
+        )
 
         # save eval rollouts as videos in tensorboard event file
         if self.log_video and train_video_paths != None:
@@ -194,10 +197,11 @@ class Trainer():
         # TODO: should add a visualization tool to check the trained reward function
         if self.logmetrics:
             # returns, for logging
-            eval_returns = [eval_path.rewards.sum() for eval_path in eval_paths]
+            eval_returns = [path.rewards.sum() for path in eval_paths]
+            eval_replay_buffer_returns = [path.rewards.sum() for path in eval_paths_replay_buffer]
 
             # episode lengths, for logging
-            eval_ep_lens = [len(eval_path) for eval_path in eval_paths]
+            eval_ep_lens = [len(path) for path in eval_paths]
 
             # decide what to log
             logs = OrderedDict()
@@ -206,6 +210,11 @@ class Trainer():
             logs["Eval/MaxReturn"] = np.max(eval_returns)
             logs["Eval/MinReturn"] = np.min(eval_returns)
             logs["Eval/AverageEpLen"] = np.mean(eval_ep_lens)
+
+            logs["Eval/AverageReturn_buffer"] = np.mean(eval_replay_buffer_returns)
+            logs["Eval/StdReturn_buffer"] = np.std(eval_replay_buffer_returns)
+            logs["Eval/MaxReturn_buffer"] = np.max(eval_replay_buffer_returns)
+            logs["Eval/MinReturn_buffer"] = np.min(eval_replay_buffer_returns)
 
             logs["TimeSinceStart"] = time.time() - self.start_time
             logs.update(reward_logs)

@@ -191,7 +191,7 @@ class IRL_Agent(BaseAgent):
         }
 
         for loss_name, loss_val in policy_logs.items():
-            print(loss_name, f" {loss_val.item():.2f}")
+            print(loss_name, f"{loss_val.item():.2f}")
         return policy_logs
 
 
@@ -212,3 +212,21 @@ class IRL_Agent(BaseAgent):
 
     def sample_transitions(self, batch_size: int) -> List[types.Transition]:
         return self.demo_buffer.sample_random_transitions(batch_size)
+
+
+    def eval_on_replay_buffer(
+        self, 
+        env,
+        policy,
+        batch_size: Optional[int] = 64
+    ) -> List[types.Trajectory]:
+        """Evaluate the policy by setting initial states from replay buffer"""
+        demo_transitions = self.sample_transitions(batch_size)
+
+        paths = []
+        for transition in demo_transitions:
+            qpos = transition.info['qpos']
+            qvel = transition.info['qvel']
+            paths.append(utils.sample_trajectory(env, policy, qpos, qvel))
+
+        return paths

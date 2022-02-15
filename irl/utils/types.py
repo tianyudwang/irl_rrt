@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict
 import numpy as np
 import torch as th
 
@@ -12,6 +12,11 @@ class Trajectory:
 
     actions: np.ndarray
     """Actions, shape (trajectory_len, ) + action_shape."""
+
+    infos: Dict[str, np.ndarray]
+    """Infos, shape (trajectory_len, val_dim)
+    For Reacher-v2, we store the qpos and qvel for the next_state
+    """
 
     def __len__(self):
         """Returns number of transitions, equal to the number of actions."""
@@ -26,6 +31,11 @@ class Trajectory:
             )
         if len(self.actions) == 0:
             raise ValueError("Degenerate trajectory: must have at least one action.")
+
+        for key, val in self.infos.items():
+            if len(val) != len(self.actions):
+                print(val.shape)
+                raise ValueError(f"Infos shape {len(val)} does not match actions {len(self.actions)}")
 
 @dataclass(frozen=True)
 class TrajectoryWithReward(Trajectory):
@@ -56,6 +66,9 @@ class Transition:
     next_state: np.ndarray
     """Next state, shape (observation_shape, )."""
 
+    info: Dict[str, np.ndarray]
+    """For Reacher-v2, info contains qpos and qvel for next state"""
+
     def __len__(self):
         """Length of a transition is always 1"""
         return 1
@@ -79,7 +92,10 @@ def convert_trajectories_to_transitions(trajectories: List[Trajectory]) -> List[
     transitions = []
     for traj in trajectories:
         for i in range(len(traj)):
-            transition = Transition(traj.states[i], traj.actions[i], traj.states[i+1])
+            info = {}
+            for key, val in traj.infos.items():
+                info[key] = val[i]
+            transition = Transition(traj.states[i], traj.actions[i], traj.states[i+1], info)
             transitions.append(transition)
 
     assert len(transitions) == sum([len(traj) for traj in trajectories]), (
