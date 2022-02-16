@@ -59,11 +59,11 @@ class Trainer:
         }
 
         train_args = {
+            "env_name": params["env_name"],
+            "planner_type": params["planner_type"],
             "reward_updates_per_iter": params["reward_updates_per_iter"],
             "transitions_per_reward_update": params["transitions_per_reward_update"],
-            "agent_actions_per_demo_transition": params[
-                "agent_actions_per_demo_transition"
-            ],
+            "agent_actions_per_demo_transition": params["agent_actions_per_demo_transition"],
         }
 
         agent_params = {**computation_graph_args, **train_args}
@@ -158,12 +158,7 @@ class Trainer:
         self.params["agent_params"]["ac_dim"] = ac_dim
         self.params["agent_params"]["ob_dim"] = ob_dim
 
-        self.agent = IRLAgent(
-            self.env,
-            self.params["agent_params"],
-            self.params["planner_type"],
-            self.params["timeLimit"],
-        )
+        self.agent = IRLAgent(self.env, self.params["agent_params"])
 
     def training_loop(self):
 
@@ -230,7 +225,7 @@ class Trainer:
             f"{self.env.action_space.shape[0]}"
         )
 
-        utils.check_valid(dataset)
+        utils.sanity_check(dataset)
 
         dones = np.where(dataset['terminals'])[0][:batch_size]
 
@@ -316,19 +311,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env_name", type=str, default="maze2d-umaze-v1")
     parser.add_argument("--expert_filename", type=str, default="maze2d-umaze-v1.hdf5")
-    parser.add_argument("--timeLimit", type=float, default=2)
-    
-    # parser.add_argument(
-    #     "--expert_policy",
-    #     type=str,
-    #     choices=[
-    #         "SAC_NavEnv-v0",
-    #         "SAC_Pendulum-v0",
-    #         "SAC_PointUMaze-v0",
-    #         "TQC_Pendulum-v0",
-    #         "TQC_PointUMaze-v0",
-    #     ],
-    # )
     parser.add_argument(
         "--planner_type",
         "-pt",
@@ -352,16 +334,16 @@ def main():
         help="Number of reward updates per iteration",
     )
     parser.add_argument(
-        "--timesteps_per_policy_update",
-        type=int,
-        default=15000,
-        help="Number of policy updates per iteration",
-    )
-    parser.add_argument(
         "--transitions_per_reward_update",
         type=int,
         default=128,
         help="Number of agent transitions per reward update",
+    )
+    parser.add_argument(
+        "--timesteps_per_policy_update",
+        type=int,
+        default=15000,
+        help="Number of policy updates per iteration",
     )
     parser.add_argument(
         "--agent_actions_per_demo_transition",
@@ -372,11 +354,10 @@ def main():
     parser.add_argument(
         "--eval_batch_size",
         type=int,
-        default=64,
+        default=32,
         help="Number of policy rollouts for evaluation",
     )
 
-    parser.add_argument("--discount", type=float, default=1.0)
     parser.add_argument("--n_layers", "-l", type=int, default=2)
     parser.add_argument("--size", "-s", type=int, default=64)
     parser.add_argument("--output_size", type=int, default=1)

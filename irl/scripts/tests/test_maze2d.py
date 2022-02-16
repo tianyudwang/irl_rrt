@@ -143,23 +143,54 @@ def test_maze2d_SST_planner():
     planner = cp.Maze2DSSTPlanner(env.unwrapped)
     for _ in range(10):
         obs = env.reset()
-        print(obs)
-        status, states, controls = planner.plan(start=obs, solveTime=15)
+        status, states, controls = planner.plan(start=obs)
 
         # planner_utils.visualize_path(states, goal, save=True)
-
         # Check rollout states from controls and compare to planned states
         obs = env.reset()
+        # env.render()
         rollout_states = [obs]
         for j in range(len(controls)):
             control = controls[j]
             obs, _, _, _ = env.step(control)
+            # env.render()
             rollout_states.append(obs)
         rollout_states = np.array(rollout_states)
 
         assert len(rollout_states) == len(states)
         assert np.linalg.norm(rollout_states - states) < 0.1
 
+def test_maze2d_KPIECE_planner():
+    """
+    Reset the maze2d-umaze-v1 environment and use initial state
+    to plan optimal path to goal at (1, 1)
+    """
+
+    env_name = "maze2d-umaze-v1"
+    env = gym.make(env_name)
+    env = wrappers.Maze2DFixedStartWrapper(env)
+    goal = np.array([1., 1.])
+
+    planner = cp.Maze2DKPIECEPlanner(env.unwrapped)
+    for _ in range(1):
+        obs = env.reset()
+        status, states, controls = planner.plan(start=obs)
+
+        print(states[:, :2])
+        # planner_utils.visualize_path(states, goal, save=True)
+        # Check rollout states from controls and compare to planned states
+        obs = env.reset()
+        # env.render()
+        rollout_states = [obs]
+        for j in range(len(controls)):
+            control = controls[j]
+            obs, _, _, _ = env.step(control)
+            # env.render()
+            rollout_states.append(obs)
+        rollout_states = np.array(rollout_states)
+
+        assert len(rollout_states) == len(states)
+        assert np.linalg.norm(rollout_states - states) < 0.1
 
 def test_maze2d_RRT_planner():
     """
@@ -195,6 +226,7 @@ if __name__ == '__main__':
     # test_feasible_region()
     # test_maze2d_RRTstar_planner()
     # test_maze2d_PRMstar_multiple_queries()
-    test_maze2d_PRMstar_planner()
+    # test_maze2d_PRMstar_planner()
     # test_maze2d_RRT_planner()
     # test_maze2d_SST_planner()
+    test_maze2d_KPIECE_planner()

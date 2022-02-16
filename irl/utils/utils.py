@@ -156,51 +156,59 @@ def render_trajectory(env, qpos, qvel):
         env.set_state(qpos[i], qvel[i])
         env.render()
 
-# def check_valid(dataset):
-#     observations = dataset['observations']
-#     actions = dataset['actions']
+def sanity_check(dataset):
+    if dataset['observations'].shape[1] == 4:
+        maze2d_sanity_check(dataset)
+    elif dataset['observations'].shape[1] == 29:
+        antmaze_sanity_check(dataset)
+    else:
+        raise ValueError("Dataset not recognized")
 
-#     state_low = np.array([0.5, 0.5, -5., -5.])
-#     state_high = np.array([3.5, 3.5, 5., 5.])
+def maze2d_sanity_check(dataset):
+    observations = dataset['observations']
+    actions = dataset['actions']
 
-#     size = 0.1
-#     # Square extents
-#     square_x_min = 0.5 + size
-#     square_x_max = 3.5 - size
-#     square_y_min = 0.5 + size
-#     square_y_max = 3.5 - size
+    state_low = np.array([0.5, 0.5, -5., -5.])
+    state_high = np.array([3.5, 3.5, 5., 5.])
 
-#     # Rectangle extents
-#     rect_x_min = 1.5 - size
-#     rect_x_max = 2.5 + size
-#     rect_y_min = 0.5 + size
-#     rect_y_max = 2.5 + size
+    size = 0.1
+    # Square extents
+    square_x_min = 0.5 + size
+    square_x_max = 3.5 - size
+    square_y_min = 0.5 + size
+    square_y_max = 3.5 - size
 
-#     action_low = np.array([-1, -1])
-#     action_high = np.array([1, 1])
+    # Rectangle extents
+    rect_x_min = 1.5 - size
+    rect_x_max = 2.5 + size
+    rect_y_min = 0.5 + size
+    rect_y_max = 2.5 + size
 
-#     for state in observations:
-#         assert (state_low <= state).all() and (state <= state_high).all(), (
-#             f"State {state} not in bounds"
-#         )
+    action_low = np.array([-1, -1])
+    action_high = np.array([1, 1])
 
-#         in_square = ((square_x_min <= state[0] <= square_x_max) 
-#             and (square_y_min <= state[1] <= square_y_max))
-#         assert in_square, (
-#             f"State {state} not in square"
-#         )
+    for state in observations:
+        assert (state_low <= state).all() and (state <= state_high).all(), (
+            f"State {state} not in bounds"
+        )
 
-#         in_rect = ((rect_x_min <= state[0] <= rect_x_max) 
-#             and (rect_y_min <= state[1] <= rect_y_max))
-#         assert not in_rect, (
-#             f"State {state} in rectangle"
-#         )
+        in_square = ((square_x_min <= state[0] <= square_x_max) 
+            and (square_y_min <= state[1] <= square_y_max))
+        assert in_square, (
+            f"State {state} not in square"
+        )
 
-#     for action in actions:
-#         assert (action_low <= action).all() and (action <= action_high).all(), (
-#             f"Action {action} not in bounds")
+        in_rect = ((rect_x_min <= state[0] <= rect_x_max) 
+            and (rect_y_min <= state[1] <= rect_y_max))
+        assert not in_rect, (
+            f"State {state} in rectangle"
+        )
 
-def check_valid(dataset):
+    for action in actions:
+        assert (action_low <= action).all() and (action <= action_high).all(), (
+            f"Action {action} not in bounds")
+
+def antmaze_sanity_check(dataset):
     observations = dataset['observations']
     actions = dataset['actions']
 
