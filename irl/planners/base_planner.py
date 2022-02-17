@@ -9,29 +9,32 @@ from ompl import base as ob
 from irl.utils import planner_utils
 
 
-class ReacherGoalState(ob.GoalState):
+class ReacherGoal(ob.GoalState):
     """
     Defines a goal region around goal state with threshold 
-    In Reacher-v2, reaches goal if fingertip position is close to target
+    In Reacher-v2, move two joint such that fingertip position is close to target
     """
     def __init__(
         self, 
         si: ob.SpaceInformation,
-        goal: np.ndarray,
+        target: np.ndarray,
         threshold: Optional[float] = 0.01
     ):
         super().__init__(si)
-        self.goal = goal
+        self.target = target
+        self.th1, self.th2 = planner_utils.compute_angles_from_xy(self.target[0], self.target[1])
         self.setThreshold(threshold)
 
     def distanceGoal(self, state: ob.State) -> float:
-        """Computes the distance from state to goal"""
-        finger_pos = np.array([state[3][0], state[3][1]])
-        return np.linalg.norm(self.goal - finger_pos)
+        """Computes the distance from state to target"""
+        finger_pos = planner_utils.compute_xy_from_angles(state[0].value, state[1].value)
+        return np.linalg.norm(self.target - finger_pos)
 
     def sampleGoal(self, state: ob.State) -> None:
-        state[3][0] = self.goal[0]
-        state[3][1] = self.goal[1]
+        state[0].value = self.th1
+        state[1].value = self.th2
+        state[2][0] = 0.
+        state[2][1] = 0.
 
 
 class ReacherStateValidityChecker(ob.StateValidityChecker):
@@ -62,8 +65,8 @@ class ReacherBasePlanner:
     """
 
     def __init__(self):
-        # 2 joint angles + 2 angular velocities + finger xy
-        self.state_dim = 6
+        # 2 joint angles + 2 angular velocities
+        self.state_dim = 4
         # 2 joint torque
         self.control_dim = 2
         ou.setLogLevel(ou.LogLevel.LOG_ERROR)
@@ -71,7 +74,7 @@ class ReacherBasePlanner:
     def get_StateSpace(self) -> ob.StateSpace:
         """
         Create the state space for Reacher-v2
-        State includes [theta, theta_dot, fingertip_xy]
+        State includes [theta, theta_dot]
         """
         # Construct [theta, theta_dot] state space
         # SO2 state space enforces angle to be in [-pi, pi]
@@ -86,21 +89,12 @@ class ReacherBasePlanner:
             )
         )
 
-        finger_space = ob.RealVectorStateSpace(2)
-        space_bounds = planner_utils.make_RealVectorBounds(
-            dim=2,
-            low=np.array([-0.21, -0.21]),
-            high=np.array([0.21, 0.21])
-        )
-        finger_space.setBounds(space_bounds)
-
         # Create compound space which allows the composition of state spaces.
         space = ob.CompoundStateSpace()
         subspaces = [
             joint0_th_space, 
             joint1_th_space, 
-            joint_thdot_space, 
-            finger_space
+            joint_thdot_space
         ]
         for subspace in subspaces:
             space.addSubspace(subspace, 1.0)
@@ -118,23 +112,21 @@ class ReacherBasePlanner:
     def get_StateValidityChecker(self, si: ob.SpaceInformation) -> ob.StateValidityChecker:
         return ReacherStateValidityChecker(si)
 
-    def get_Goal(self, si: ob.SpaceInformation, goal: np.ndarray) -> ob.Goal:
-        return ReacherGoalState(si, goal)
+    def get_Goal(self, si: ob.SpaceInformation, target: np.ndarray) -> ob.Goal:
+        return ReacherGoal(si, target)
 
     def get_StartState(self, start: np.ndarray) -> ob.State:
-        if isinstance(start, np.ndarray):
-            assert start.ndim == 1
+        assert isinstance(start, np.ndarray) and start.ndim == 1 and len(start) == self.state_dim
+
         start_state = ob.State(self.space)
         for i in range(len(start)):
             # * Copy an element of an array to a standard Python scalar
             # * to ensure C++ can recognize it.
             start_state[i] = start[i]
 
-        # import ipdb; ipdb.set_trace()
         assert self.state_validity_checker.isValid(start_state), (
             f"Start state {start} is not valid"
         )        
-        # import ipdb; ipdb.set_trace()
         return start_state
 
     def update_ss_cost(self, cost_fn: Callable, target: np.ndarray):

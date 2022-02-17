@@ -7,6 +7,7 @@ from torch import nn
 from torch import optim
 
 import irl.utils.pytorch_util as ptu
+from irl.utils import planner_utils
 
 class RewardNet(nn.Module):
     """
@@ -32,7 +33,8 @@ class RewardNet(nn.Module):
     def init_model(self, device: Optional[th.device] = th.device("cuda")) -> nn.Module:
         """Initialize reward neural network"""
         model = ptu.build_mlp(
-            input_size=self.reward_params['ob_dim'] * 2,
+            # input_size=self.reward_params['ob_dim'] * 2,
+            input_size=6*2,
             output_size=self.reward_params['output_size'],
             n_layers=self.reward_params['n_layers'],
             size=self.reward_params['size'],
@@ -247,12 +249,23 @@ class RewardNet(nn.Module):
 
     def compute_Q(
         self, 
-        path: th.Tensor
+        path: th.Tensor,
+        debug: Optional[bool] = False
     ) -> th.Tensor:
         """Compute the Q value of a path"""
-        states, next_states = path[:-1], path[1:]
-        reward = self(self.model, states, next_states)
-        Q = th.sum(reward, dim=0, keepdim=False)
+
+        if debug:
+            Q = ptu.from_numpy(np.zeros(1))
+
+            for state in path:            
+                fingertip = planner_utils.compute_xy_from_angles(state[0].item(), state[1].item())
+                fingertip = ptu.from_numpy(np.array(fingertip))
+                c = th.linalg.norm(fingertip - state[-2:])
+                Q += th.linalg.norm(fingertip - state[-2:]) #+ th.linalg.norm(state[2:4])
+        else:
+            states, next_states = path[:-1], path[1:]
+            reward = self(self.model, states, next_states)
+            Q = th.sum(reward, dim=0, keepdim=False)
         return Q
 
 

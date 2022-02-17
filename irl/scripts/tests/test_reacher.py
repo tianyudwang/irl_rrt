@@ -1,3 +1,4 @@
+import time
 import gym 
 import numpy as np
 
@@ -15,8 +16,49 @@ from irl.planners import geometric_planner as gp
 from irl.planners import control_planner as cp
 
 
-np.set_printoptions(precision=6)
+np.set_printoptions(precision=6, suppress=True)
 
+def test_compute_xy_from_angles():
+    env_name = "Reacher-v2"
+    env = gym.make(env_name)
+    env = ReacherWrapper(env)
+
+    for i in range(10000):
+        ob = env.reset(random=True)
+
+        th1, th2 = ob[0], ob[1]
+        xy = planner_utils.compute_xy_from_angles(th1, th2)
+        xy = np.array(xy)
+
+        assert np.allclose(ob[4:6], xy, atol=1e-6), (
+            f"true fingertip {ob[4:6]}, computed fingertip {xy}"
+        )
+
+
+def test_compute_angles_from_xy():
+    """
+    planner_utils.compute_angles_from_xy has numerical precision issues
+    angles do not recover the fingertip position precisely
+    """
+    env_name = "Reacher-v2"
+    env = gym.make(env_name)
+    env = ReacherWrapper(env)
+
+    for i in range(1000):
+        ob = env.reset(random=True)
+        # print(f"arm1 start loc {env.unwrapped.get_body_com('body1')[:2]}")
+        th1, th2 = planner_utils.compute_angles_from_xy(ob[4], ob[5])   
+
+        # convert angles back to xy and should match fingertip
+        xy = planner_utils.compute_xy_from_angles(th1, th2)
+        xy = np.array(xy)
+
+        dist = np.linalg.norm(xy - ob[4:6])
+        assert dist < 1e-2, (
+            f"true fingertip {ob[4:6]}, computed fingertip {xy}"
+        )
+
+ 
 def test_reacher_next_state():
     env = gym.make("Reacher-v2")
     env = ReacherWrapper(env)
@@ -47,44 +89,44 @@ def test_reacher_next_state():
     assert states_after_diff < 1e-6, (
         f"Next state difference: {states_after_diff:.8f}")
 
-def test_reacher_StatePropagator():
-    env = gym.make("Reacher-v2")
-    env = ReacherWrapper(env)
+# def test_reacher_StatePropagator():
+#     env = gym.make("Reacher-v2")
+#     env = ReacherWrapper(env)
 
-    # Sample random state and next state from env and compare to ompl propagate function
-    planner = cp.ReacherSSTPlanner(env.unwrapped)
-    state_propagator = planner.state_propagator
+#     # Sample random state and next state from env and compare to ompl propagate function
+#     planner = cp.ReacherSSTPlanner(env.unwrapped)
+#     state_propagator = planner.state_propagator
 
-    for i in range(1000):
-        # gym step
-        obs = env.reset()
-        qpos = env.unwrapped.sim.data.qpos.ravel()[:].copy()
-        qvel = env.unwrapped.sim.data.qvel.ravel()[:].copy()
-        gym_state_before = obs[:6].astype(np.float64)
-        action = env.action_space.sample()
-        obs, rew, done, info = env.step(action)
-        gym_state_after = obs[:6]
+#     for i in range(1000):
+#         # gym step
+#         obs = env.reset()
+#         qpos = env.unwrapped.sim.data.qpos.ravel()[:].copy()
+#         qvel = env.unwrapped.sim.data.qvel.ravel()[:].copy()
+#         gym_state_before = obs[:6].astype(np.float64)
+#         action = env.action_space.sample()
+#         obs, rew, done, info = env.step(action)
+#         gym_state_after = obs[:6]
 
-        # ompl propagate
-        state_before = planner.get_StartState(gym_state_before)
-        state_after = ob.State(planner.space)
-        control = planner.cspace.allocControl()
-        action = action.astype(np.float64)
-        control[0] = action[0]
-        control[1] = action[1]
-        state_propagator.propagate(state_before(), control, 2.0, state_after()) 
-        ompl_state_after = planner_utils.convert_ompl_state_to_numpy(state_after())
+#         # ompl propagate
+#         state_before = planner.get_StartState(gym_state_before)
+#         state_after = ob.State(planner.space)
+#         control = planner.cspace.allocControl()
+#         action = action.astype(np.float64)
+#         control[0] = action[0]
+#         control[1] = action[1]
+#         state_propagator.propagate(state_before(), control, 2.0, state_after()) 
+#         ompl_state_after = planner_utils.convert_ompl_state_to_numpy(state_after())
 
-        # compare
-        assert np.allclose(ompl_state_after, gym_state_after, atol=1e-6), (
-            f"States do not match after ompl propagte \n"
-            f"obs before {gym_state_before} \n"
-            f"qpos before {qpos} \n"
-            f"qvel before {qvel} \n"
-            f"action {action} \n"
-            f"gym state after {gym_state_after} \n"
-            f"ompl state after {ompl_state_after} \n"
-        )
+#         # compare
+#         assert np.allclose(ompl_state_after, gym_state_after, atol=1e-6), (
+#             f"States do not match after ompl propagte \n"
+#             f"obs before {gym_state_before} \n"
+#             f"qpos before {qpos} \n"
+#             f"qvel before {qvel} \n"
+#             f"action {action} \n"
+#             f"gym state after {gym_state_after} \n"
+#             f"ompl state after {ompl_state_after} \n"
+#         )
 
 def reacher_cost_fn(s1, s2):
     assert (s1[-2:] == s2[-2:]).all(), "Target state not equal"
@@ -98,22 +140,31 @@ def test_reacher_RRTstar_planner():
     env = ReacherWrapper(env)
 
     planner = gp.ReacherRRTstarPlanner()
-    for _ in range(10):
+    for _ in range(100):
         obs = env.reset()
-        start = obs[:-2].astype(np.float64)
+        start = obs[:4].astype(np.float64)
         target = obs[-2:].astype(np.float64)
         planner.update_ss_cost(reacher_cost_fn, target)
         status, states, controls = planner.plan(start=start, goal=target)
 
-        finger_pos = states[-1][-2:]
+        # env.reset()
+        # for state in states:
+        #     qpos, qvel = np.zeros(4), np.zeros(4)
+        #     qpos[:2] = state[:2]
+        #     qvel[:2] = state[2:4]
+        #     qpos[2:4] = target
+        #     env.set_state(qpos, qvel)
+        #     env.render()
+        #     time.sleep(0.01)
+
+        finger_pos = planner_utils.compute_xy_from_angles(states[-1][0], states[-1][1])
         dist = np.linalg.norm(target - finger_pos)
-        assert dist <= 0.05, (
+        assert dist <= 0.01, (
             f"Reacher finger position {states[-1]} does not reach target at {target}",
             f"Distance to target is {dist}"
         )
 
 def test_reacher_PRMstar_planner():
-
     env_name = "Reacher-v2"
     env = gym.make(env_name)
     env = ReacherWrapper(env)
@@ -121,16 +172,32 @@ def test_reacher_PRMstar_planner():
     planner = gp.ReacherPRMstarPlanner()
     for _ in range(10):
         obs = env.reset()
-        start = obs[:-2].astype(np.float64)
-        target = obs[-2:].astype(np.float64)
+        start = obs[:4].astype(np.float64)
+        # target = obs[-2:].astype(np.float64)
+        target = np.array([-0.21, 0], dtype=np.float64)
         status, states, controls = planner.plan(start=start, goal=target)
 
         print(start, states[0])
         print(f"Start state distance {np.linalg.norm(states[0] - start):.2f}")
 
-        finger_pos = states[-1][-2:]
+        print(states)
+        finger_pos = planner_utils.compute_xy_from_angles(states[-1][0], states[-1][1])
         dist = np.linalg.norm(target - finger_pos)
         print(f"Final state fingertip dist {dist:.2f}")
+
+        env.reset()
+        print(len(states))
+        for state in states:
+            print(state)
+            qpos, qvel = np.zeros(4), np.zeros(4)
+            qpos[:2] = state[:2]
+            qvel[:2] = state[2:4]
+            qpos[2:4] = target
+            env.set_state(qpos, qvel)
+            env.render()
+            time.sleep(0.01)
+        import ipdb; ipdb.set_trace()
+
         # if dist >= 0.02:
         #     import ipdb; ipdb.set_trace()
         # assert dist <= 0.05, (
@@ -204,6 +271,9 @@ def eval(env, model):
     print(f"Episode length {np.mean(lengths):.2f} +/- {np.std(lengths):.2f}")
 
 if __name__ == '__main__':
+    # test_compute_xy_from_angles()
+    # test_compute_angles_from_xy()
+    # test_reacher_fingertip()
     test_reacher_RRTstar_planner()
     # test_reacher_PRMstar_planner()
     # test_reacher_SST_planner()

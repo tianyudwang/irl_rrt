@@ -176,7 +176,7 @@ class IRL_Agent(BaseAgent):
         agent_Qs = []
         policy_loss = 0
         for agent_paths, agent_log_probs in zip(agent_paths_l, agent_log_probs_l):
-            agent_Q = th.cat([self.reward.compute_Q(path) for path in agent_paths])
+            agent_Q = th.cat([self.reward.compute_Q(path, debug=True) for path in agent_paths])
             agent_Qs.append(agent_Q)
             policy_loss += (agent_log_probs - agent_Q).mean()
 

@@ -24,6 +24,70 @@ PlannerStatus = {
     'Approximate solution': 2,
 }
 
+def compute_xy_from_angles(th1: float, th2: float) -> Tuple[float, float]:
+    """
+    Compute fingertip xy given the angles of the two joints
+    arm length is 0.1 each, finger ball size is 0.01
+    second angle is w.r.t. first angle
+    """
+    # assert (-np.pi <= th1 <= np.pi and -np.pi <= th2 <= np.pi), (
+    #     f"Angles {th1, th2} not in range -pi to pi"
+    # )
+    th2 = th2 + th1
+    xy1 = np.array([np.cos(th1), np.sin(th1)]) * 0.1
+    xy2 = np.array([np.cos(th2), np.sin(th2)]) * 0.11
+    xy = xy1 + xy2
+    return xy[0], xy[1]
+
+def compute_angles_from_xy(x: float, y: float) -> Tuple[float, float]:
+    """
+    Compute the two joint angles such that the reacher fingertip touches the target xy
+    We have two unique solutions which are mirror images w.r.t. the line through xy
+    Numerical precision 
+    """ 
+
+    # Normalize x, y to within 0.21 from origin
+    if x**2 + y**2 > 0.21**2:
+        l = np.sqrt(x**2 + y**2)
+        x = x / l * 0.21
+        y = y / l * 0.21
+
+    # Degenerate slope if y = 0
+    if np.abs(y) < 1e-6:
+        x1 = .1 / .21 * x
+        y1 = np.sqrt(0.21**2 - x1**2)
+        th1 = np.arctan2(y1, x1)
+    else:
+        # Compute the perpendicular line of (0, 0) and (x, y) intersecting at 0.1 / 0.21 * (x, y)
+        k = - x / y
+        b = .1 / .21 * (y + x**2 / y)   
+        # assert np.abs(k * .1/.21 * x + b - .1/.21*y) < 1e-6
+
+        # Compute the intersection of the perpendicular bisector and the circle of radius 0.1 at origin
+        # Solve to quadratic equation
+        coeffs = [k**2 + 1, 2*k*b, b**2 - 0.1**2]
+        # x1, x11 = np.roots(coeffs)  
+        x1 = (-coeffs[1] + np.sqrt(coeffs[1]**2 - 4*coeffs[0]*coeffs[2])) / (2 * coeffs[0])
+        # assert np.linalg.norm(x1-x1_1) < 1e-6 or np.linalg.norm(x1-x1_2) < 1e-6
+
+        # Compute endpoint of first arm (x1, y1) and angle th1
+        y1 = k * x1 + b
+        th1 = np.arctan2(y1, x1)
+        if np.isnan(th1):
+            import ipdb; ipdb.set_trace()
+    # assert np.abs(x1**2 + y1**2 - 0.1**2) <= 1e-6, f"First arm radius is {np.sqrt(x1**2 + y1**2)}, not 0.1"
+    # print(f"computed body1 {x1:.6f}, {y1:.6f}")
+
+    # Compute angle of second arm
+    x2, y2 = x - x1, y - y1
+    th2 = angle_normalize(np.arctan2(y2, x2) - th1)
+
+    xy_recovered = np.array(compute_xy_from_angles(th1, th2))
+    xy = np.array([x, y])
+    # assert np.linalg.norm(xy - xy_recovered) < 1e-3, (
+    #     f"Given xy {xy}, recovered_xy {xy_recovered}, distance {np.linalg.norm(xy-xy_recovered):.5f}")
+    return th1, th2
+
 
 class ReacherIRLObjective(ob.OptimizationObjective):
     def __init__(self, si, cost_fn: Callable, target: np.ndarray):
@@ -52,10 +116,9 @@ class MinimumTransitionObjective(ob.PathLengthOptimizationObjective):
 
 class ReacherShortestDistanceObjective(ob.PathLengthOptimizationObjective):
     """
-    Cost for a state is its distance to target
+    Cost for a state is its distance from fingertip to target, plus angular velocities
     OMPL does not allow control cost, thus ignoring the control effort here
     """
-
     def __init__(
         self, 
         si: Union[oc.SpaceInformation, ob.SpaceInformation],
@@ -65,9 +128,14 @@ class ReacherShortestDistanceObjective(ob.PathLengthOptimizationObjective):
         self.target = target
 
     def stateCost(self, s: ob.State) -> ob.Cost:
-        fingertip = np.array([s[3][0], s[3][1]], dtype=np.float32)
+        fingertip = compute_xy_from_angles(s[0].value, s[1].value)
         c = np.linalg.norm(self.target - fingertip).item()
+        c += np.sqrt(s[2][0] ** 2 + s[2][1] ** 2)
         return ob.Cost(c)
+
+def angle_normalize(x):
+    """Normalize angle between -pi and pi"""
+    return ((x + np.pi) % (2 * np.pi)) - np.pi
 
 def make_RealVectorBounds(
     dim: int, 
@@ -96,7 +164,7 @@ def make_RealVectorBounds(
     return vector_bounds
 
 def convert_ompl_state_to_numpy(state: ob.State) -> np.ndarray:
-    return np.array([state[0].value, state[1].value, state[2][0], state[2][1], state[3][0], state[3][1]])
+    return np.array([state[0].value, state[1].value, state[2][0], state[2][1]])
 
 def path_to_numpy(path: Union[og.PathGeometric, oc.PathControl], dim: int) -> np.ndarray:
     """Convert OMPL path to numpy array"""
@@ -182,10 +250,9 @@ def plan_from_state(
     cost_fn: Callable[[np.ndarray], np.ndarray]
 ) -> Tuple[str, np.ndarray, np.ndarray]:
     # Construct env and planner
-    start, target = state[:6].astype(np.float64), state[6:].astype(np.float64)
+    start = state[:4].astype(np.float64) 
+    target = state[-2:].astype(np.float64)
 
-    # env = ReacherWrapper(gym.make("Reacher-v2"))
-    # planner = cp.ReacherSSTPlanner(env)
     planner = gp.ReacherRRTstarPlanner()
     planner.update_ss_cost(cost_fn, target)
 
@@ -200,7 +267,7 @@ def plan_from_state(
         path,
         np.repeat(target.reshape(1, -1), len(path), axis=0)
     ), axis=1)
-    assert path.shape[1] == state.shape[0]
+    assert path.shape[1] == 6           # 2 pos + 2 vel + 2 target xy
     return status, path, control
 
 def add_states_to_paths(
@@ -211,6 +278,7 @@ def add_states_to_paths(
     assert len(states) == len(paths), (
         f"Lengths of state {len(states)} and paths {len(paths)} are not equal"
     )
+    states = th.cat([states[:,:4], states[:,-2:]], dim=1)
     padded_paths = [
         th.cat((state.reshape(1, -1), path), dim=0) 
         for state, path in zip(states, paths)

@@ -62,9 +62,6 @@ class ReacherWrapper(gym.Wrapper):
             dtype=np.float32
         )
 
-    def is_goal(self, state):
-        raise NotImplementedError
-
     def angle_normalize(self, x):
         """Normalize angle between -pi and pi"""
         return ((x + np.pi) % (2 * np.pi)) - np.pi
@@ -78,8 +75,15 @@ class ReacherWrapper(gym.Wrapper):
         }
         return ob, rew, done, info
 
-    def reset(self):
+    def reset(self, random=False):
         super().reset()
+
+        if random:
+            qpos = self.unwrapped.sim.data.qpos.flat[:].copy()
+            qvel = self.unwrapped.sim.data.qvel.flat[:].copy()
+            qpos[0] = np.random.uniform(-np.pi, np.pi)
+            qpos[1] = np.random.uniform(-np.pi, np.pi)
+            self.unwrapped.set_state(qpos, qvel)
         return self._get_obs()
 
     def _get_obs(self):

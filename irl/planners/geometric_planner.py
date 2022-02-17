@@ -52,21 +52,22 @@ class ReacherGeometricPlanner(ReacherBasePlanner):
         while not self.ss.haveExactSolutionPath() and t <= total_solveTime:
             status = self.ss.solve(solveTime)
             t += self.ss.getLastPlanComputationTime()
-                 
+
         msg = planner_utils.color_status(status)
         objective = self.ss.getProblemDefinition().getOptimizationObjective()
         if bool(status):
             # Retrieve path
             geometric_path = self.ss.getSolutionPath()
-            # geometric_path.interpolate()
-            states = geometric_path.getStates()
+            geometric_path.interpolate()
+            # states = geometric_path.getStates()
             print(
                 f"{msg}: "
-                f"Path length is {len(states)}, "
+                f"Path length is {geometric_path.getStateCount()}, "
                 f"cost is {geometric_path.cost(objective).value():.2f}, ",
                 f"solve time is {t:.2f}"
             )
-            states = planner_utils.states_to_numpy(states)
+            # states = planner_utils.states_to_numpy(states)
+            states = planner_utils.path_to_numpy(geometric_path, dim=self.state_dim)
             return status.asString(), states, None
         else:
             print(status.asString())
@@ -119,7 +120,7 @@ class ReacherPRMstarPlanner(ReacherGeometricPlanner):
         if bool(status):
             # Retrieve path
             geometric_path = self.ss.getSolutionPath()
-            # geometric_path.interpolate()
+            geometric_path.interpolate()
             states = geometric_path.getStates()
             print(
                 f"{msg}: "
