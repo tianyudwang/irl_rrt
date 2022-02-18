@@ -39,7 +39,7 @@ class RewardNet(nn.Module):
             n_layers=self.reward_params['n_layers'],
             size=self.reward_params['size'],
             activation='relu',
-            output_activation='sigmoid'
+            output_activation='relu'
         ).to(device)
         return model 
 
@@ -89,19 +89,27 @@ class RewardNet(nn.Module):
             reward = self(self.model_cpu, x1, x2)
         return reward.item()
 
-    def lcr_regularizer(self, path):
-        """Computes the high-frequency variation in reward function, c.f. GCL"""
-        # Need at least 3 states 
-        if len(path) <= 2:
-            return 0
-        lcr = 0
-        for i in range(1, len(path)-1):
-            sm1, s, sp1 = path[i-1].reshape(1, -1), path[i].reshape(1, -1), path[i+1].reshape(1, -1)
-            lcr += 2 * self(self.model, sm1, sp1) - self(self.model, sm1, s) - self(self.model, s, sp1)
-        # states, next_states = path[:-1], path[1:]
-        # rewards = self(self.model, states, next_states)
-        # lcr = th.sum(th.square(rewards[1:] - rewards[:-1]), dim=0, keepdim=False)
-        return lcr
+    def reward_regularizer(self, path):
+        """GAIL convex cost regularizer g(x) = -x - log(1 - e^x) for x < 0"""
+        states, next_states = path[:-1], path[1:]
+        reward = self(self.model, states, next_states)
+        # cost = -reward
+        loss = th.mean(-reward - th.log(1 - th.exp(reward) + 1e-6)).reshape(1)
+        return loss
+
+    # def lcr_regularizer(self, path):
+    #     """Computes the high-frequency variation in reward function, c.f. GCL"""
+    #     # Need at least 3 states 
+    #     if len(path) <= 2:
+    #         return 0
+    #     lcr = 0
+    #     for i in range(1, len(path)-1):
+    #         sm1, s, sp1 = path[i-1].reshape(1, -1), path[i].reshape(1, -1), path[i+1].reshape(1, -1)
+    #         lcr += 2 * self(self.model, sm1, sp1) - self(self.model, sm1, s) - self(self.model, s, sp1)
+    #     # states, next_states = path[:-1], path[1:]
+    #     # rewards = self(self.model, states, next_states)
+    #     # lcr = th.sum(th.square(rewards[1:] - rewards[:-1]), dim=0, keepdim=False)
+    #     return lcr
 
 
     # def update(
@@ -201,15 +209,17 @@ class RewardNet(nn.Module):
         reward_loss = - demo_Qs + agent_Qs
 
         # Regularization loss
-        demo_lcr_loss = [self.lcr_regularizer(path) for path in demo_paths]
-        agent_lcr_loss = [
-            self.lcr_regularizer(path) for agent_paths in agent_paths_l 
-            for path in agent_paths 
-        ]
-        demo_lcr_loss = th.sum(th.cat(demo_lcr_loss, dim=0))
-        agent_lcr_loss = th.sum(th.cat(agent_lcr_loss, dim=0))
+        # demo_lcr_loss = [self.lcr_regularizer(path) for path in demo_paths]
+        # agent_lcr_loss = [
+        #     self.lcr_regularizer(path) for agent_paths in agent_paths_l 
+        #     for path in agent_paths 
+        # ]
+        # demo_lcr_loss = th.sum(th.cat(demo_lcr_loss, dim=0))
+        # agent_lcr_loss = th.sum(th.cat(agent_lcr_loss, dim=0))
+        demo_reg_loss = [self.reward_regularizer(path) for path in demo_paths]
+        demo_reg_loss = th.sum(th.cat(demo_reg_loss, dim=0))
 
-        loss = reward_loss + demo_lcr_loss + agent_lcr_loss
+        loss = reward_loss + demo_reg_loss
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -220,8 +230,8 @@ class RewardNet(nn.Module):
             "Reward/agent_Q": np.mean(ptu.to_numpy(agent_Qs)),
             "Reward/agent_log_prob": np.mean(ptu.to_numpy(th.cat(agent_log_probs_l))),
             "Reward/reward_loss": ptu.to_numpy(reward_loss), 
-            "Reward/demo_lcr_loss": ptu.to_numpy(demo_lcr_loss),
-            "Reward/agent_lcr_loss": ptu.to_numpy(agent_lcr_loss),
+            "Reward/demo_reg_loss": ptu.to_numpy(demo_reg_loss),
+            # "Reward/agent_lcr_loss": ptu.to_numpy(agent_lcr_loss),
         }
 
         for loss_name, loss_val in train_reward_log.items():

@@ -131,6 +131,6 @@ class ReacherBasePlanner:
 
     def update_ss_cost(self, cost_fn: Callable, target: np.ndarray):
         # Set up cost function
-        # self.objective = planner_utils.ReacherIRLObjective(self.si, cost_fn, target)
-        self.objective = planner_utils.ReacherShortestDistanceObjective(self.si, target)
+        self.objective = planner_utils.ReacherIRLObjective(self.si, cost_fn, target)
+        # self.objective = planner_utils.ReacherShortestDistanceObjective(self.si, target)
         self.ss.setOptimizationObjective(self.objective)

@@ -50,8 +50,8 @@ class ReacherWrapper(gym.Wrapper):
             np.pi,
             np.inf,
             np.inf,
-            0.21,
-            0.21,
+            # 0.21,
+            # 0.21,
             0.21,
             0.21
         ], dtype=np.float32)
@@ -91,7 +91,7 @@ class ReacherWrapper(gym.Wrapper):
         ob = np.concatenate([
             theta,
             self.unwrapped.sim.data.qvel.flat[:2],
-            self.unwrapped.get_body_com("fingertip")[:2],
+            # self.unwrapped.get_body_com("fingertip")[:2],
             self.unwrapped.sim.data.qpos.flat[2:],
         ])
         return ob.astype(np.float32).copy()

@@ -256,7 +256,7 @@ def plan_from_state(
     planner = gp.ReacherRRTstarPlanner()
     planner.update_ss_cost(cost_fn, target)
 
-    status, path, control = planner.plan(start, target)
+    status, path, control = planner.plan(start, target, solveTime=0.2)
     assert status in PlannerStatus.keys(), f"Planner failed with status {status}"
     # assert len(path) == len(control) + 1, (
     #     f"Path length {len(path)} does not match control length {len(control)}"

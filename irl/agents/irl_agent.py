@@ -39,8 +39,8 @@ class IRL_Agent(BaseAgent):
         self.irl_env = IRLEnv(self.env, self.reward)
 
         # actor/policy with wrapped env
-        # self.policy = SAC("MlpPolicy", self.irl_env, verbose=1)
-        self.policy = self.make_actor()
+        self.policy = SAC("MlpPolicy", self.env, verbose=1)
+        # self.policy = self.make_actor()
 
         self.state_dim = self.agent_params['ob_dim']
 
@@ -92,30 +92,30 @@ class IRL_Agent(BaseAgent):
         # Copy reward NN weight from cuda to cpu, 
         # set model to eval mode in case there are BatchNorm, Dropout layers
         # and update to planner
-        # self.reward.copy_model_to_cpu()
-        # self.reward.model_cpu.eval()
+        self.reward.copy_model_to_cpu()
+        self.reward.model_cpu.eval()
 
         # Plan optimal paths from next states to goal under current reward function        
-        # demo_paths = planner_utils.plan_from_states(demo_next_states, self.reward.cost_fn)
+        demo_paths = planner_utils.plan_from_states(demo_next_states, self.reward.cost_fn)
         agent_paths_l = [
             planner_utils.plan_from_states(agent_next_states, self.reward.cost_fn) 
             for agent_next_states in agent_next_states_l
         ]
 
         # Add first state back to each path
-        # demo_paths = planner_utils.add_states_to_paths(demo_states, demo_paths)
+        demo_paths = planner_utils.add_states_to_paths(demo_states, demo_paths)
         agent_paths_l = [
             planner_utils.add_states_to_paths(demo_states, agent_paths)
             for agent_paths in agent_paths_l
         ]
 
         # Optimize reward
-        # reward_logs = self.reward.update(demo_paths, agent_paths_l, agent_log_probs_l)
-        reward_logs = {"Reward/loss": 0}
+        reward_logs = self.reward.update(demo_paths, agent_paths_l, agent_log_probs_l)
+        # reward_logs = {"Reward/loss": 0}
 
         # Optimize policy
-        policy_logs = self.train_policy(agent_paths_l, agent_log_probs_l)
-        # policy_logs = self.train_policy()
+        # policy_logs = self.train_policy(agent_paths_l, agent_log_probs_l)
+        policy_logs = self.train_policy()
 
         return reward_logs, policy_logs
 
@@ -165,44 +165,44 @@ class IRL_Agent(BaseAgent):
         return agent_actions, agent_log_probs
 
 
-    def train_policy(
-        self, 
-        agent_paths_l: List[List[th.Tensor]],
-        agent_log_probs_l: List[th.Tensor]
-    ) -> Dict[str, float]:
+    # def train_policy(
+    #     self, 
+    #     agent_paths_l: List[List[th.Tensor]],
+    #     agent_log_probs_l: List[th.Tensor]
+    # ) -> Dict[str, float]:
 
-        assert len(agent_paths_l) == len(agent_log_probs_l) == self.agent_params['agent_actions_per_demo_transition']
+    #     assert len(agent_paths_l) == len(agent_log_probs_l) == self.agent_params['agent_actions_per_demo_transition']
         
-        agent_Qs = []
-        policy_loss = 0
-        for agent_paths, agent_log_probs in zip(agent_paths_l, agent_log_probs_l):
-            agent_Q = th.cat([self.reward.compute_Q(path, debug=True) for path in agent_paths])
-            agent_Qs.append(agent_Q)
-            policy_loss += (agent_log_probs - agent_Q).mean()
+    #     agent_Qs = []
+    #     policy_loss = 0
+    #     for agent_paths, agent_log_probs in zip(agent_paths_l, agent_log_probs_l):
+    #         agent_Q = th.cat([self.reward.compute_Q(path, debug=True) for path in agent_paths])
+    #         agent_Qs.append(agent_Q)
+    #         policy_loss += (agent_log_probs - agent_Q).mean()
 
-        self.policy.optimizer.zero_grad()
-        policy_loss.backward()
-        self.policy.optimizer.step()
+    #     self.policy.optimizer.zero_grad()
+    #     policy_loss.backward()
+    #     self.policy.optimizer.step()
 
-        policy_logs = {
-            "Policy/agent_Q": ptu.to_numpy(th.mean(th.cat(agent_Qs))),
-            "Policy/agent_log_prob": ptu.to_numpy(th.mean(th.cat(agent_log_probs_l))),
-            "Policy/loss": ptu.to_numpy(policy_loss)
-        }
+    #     policy_logs = {
+    #         "Policy/agent_Q": ptu.to_numpy(th.mean(th.cat(agent_Qs))),
+    #         "Policy/agent_log_prob": ptu.to_numpy(th.mean(th.cat(agent_log_probs_l))),
+    #         "Policy/loss": ptu.to_numpy(policy_loss)
+    #     }
 
-        for loss_name, loss_val in policy_logs.items():
-            print(loss_name, f"{loss_val.item():.2f}")
-        return policy_logs
+    #     for loss_name, loss_val in policy_logs.items():
+    #         print(loss_name, f"{loss_val.item():.2f}")
+    #     return policy_logs
 
 
-    # def train_policy(self):
-    #     """
-    #     Train the policy/actor using learned reward
-    #     """
-    #     print('\nTraining agent policy...')
-    #     self.policy.learn(total_timesteps=1024*4, log_interval=16)
-    #     train_log = {'Policy/policy_loss': 0}
-    #     return train_log
+    def train_policy(self):
+        """
+        Train the policy/actor using learned reward
+        """
+        print('\nTraining agent policy...')
+        self.policy.learn(total_timesteps=1024*4, log_interval=16)
+        train_log = {'Policy/policy_loss': 0}
+        return train_log
 
     #####################################################
     #####################################################

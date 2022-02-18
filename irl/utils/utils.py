@@ -117,9 +117,10 @@ def check_demo_performance(paths):
     states_min = np.amin(states, axis=0)
     states_max = np.amax(states, axis=0)
 
-    assert ((states_min[2:4] >= np.array([-10, -10])).all() and 
-        (states_max[2:4] <= np.array([10, 10])).all()), (
-        "Demonstrations angular velocity not in range [-10, 10], need to rerun collection"
+    vel_max = 50
+    assert ((states_min[2:4] >= np.array([-vel_max, -vel_max])).all() and 
+        (states_max[2:4] <= np.array([vel_max, vel_max])).all()), (
+        f"Demonstrations angular velocity not in range {[-vel_max, vel_max]}, need to rerun collection"
     ) 
 
 

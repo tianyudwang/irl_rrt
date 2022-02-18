@@ -16,18 +16,14 @@ def build_env(env_name):
         raise ValueError('Environment {} not supported yet ...'.format(env_name))
     return env
 
-def train_policy(env, algo, resume_training, policy_name, 
-                 timesteps=50000):
+def train_policy(env, algo, policy_name, timesteps=100000):
     """
     Train the expert policy in RL
     """
     if algo == 'SAC':
         from stable_baselines3 import SAC
-        if resume_training:
-            model = SAC.load(policy_name)
-        else:
-            model = SAC("MlpPolicy", env, verbose=1)
-
+        model = SAC("MlpPolicy", env, verbose=1)
+        
         from stable_baselines3.common.logger import configure
         tmp_path = "/tmp/sb3_log/"
         # set up logger
@@ -58,13 +54,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_name', type=str, default='Reacher-v2')
     parser.add_argument('--algo', type=str, default='SAC')
-    parser.add_argument('--resume_training', action='store_true')
     args = parser.parse_args()
 
     env = build_env(args.env_name)
     
     policy_name = args.algo + '_' + args.env_name
-    model = train_policy(env, args.algo, args.resume_training, policy_name)
+    model = train_policy(env, args.algo, policy_name)
 
     visualize_policy(env, model)
 
