@@ -89,11 +89,18 @@ class RewardNet(nn.Module):
             reward = self(self.model_cpu, x1, x2)
         return reward.item()
 
-    def reward_regularizer(self, path):
+    def gail_reg(self, path):
         """GAIL convex cost regularizer g(x) = -x - log(1 - e^x) for x < 0"""
         states, next_states = path[:-1], path[1:]
         reward = self(self.model, states, next_states)
-        loss = th.mean(-reward - th.log(1 - th.exp(reward) + 1e-6), dim=0, keepdim=False)
+        loss = th.sum(-reward - th.log(1 - th.exp(reward) + 1e-6), dim=0, keepdim=False)
+        return loss
+
+    def squared_reg(self, path):
+        """Convex squared regulaizer phi(r) = r^2"""
+        states, next_states = path[:-1], path[1:]
+        reward = self(self.model, states, next_states)
+        loss = th.sum(th.square(reward), dim=0, keepdim=False)
         return loss
 
     # def lcr_regularizer(self, path):
@@ -210,10 +217,14 @@ class RewardNet(nn.Module):
         reward_loss = - demo_Qs + agent_Qs
 
         # Reward regularization
-        demo_reg_loss = th.cat([self.reward_regularizer(path) for path in demo_paths], dim=0)
-        demo_reg_loss = th.mean(demo_reg_loss)
+        gail_reg_loss = th.mean(
+            th.cat([self.gail_reg(path) for path in demo_paths], dim=0)
+        )
+        squared_reg_loss = th.mean(
+            th.cat([self.squared_reg(path) for path in demo_paths]), dim=0
+        )
 
-        loss = reward_loss + demo_reg_loss
+        loss = reward_loss + squared_reg_loss
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -225,7 +236,8 @@ class RewardNet(nn.Module):
             "Reward/agent_Q": np.mean(ptu.to_numpy(agent_Qs)),
             "Reward/agent_log_prob": np.mean(ptu.to_numpy(th.cat(agent_log_probs_l))),
             "Reward/reward_loss": ptu.to_numpy(reward_loss), 
-            "Reward/demo_reg_loss": ptu.to_numpy(demo_reg_loss),
+            "Reward/gail_reg_loss": ptu.to_numpy(gail_reg_loss),
+            "Reward/squared_reg_loss": ptu.to_numpy(squared_reg_loss),
         }
 
         for loss_name, loss_val in train_reward_log.items():
