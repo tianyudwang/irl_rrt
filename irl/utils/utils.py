@@ -3,11 +3,14 @@ import time
 
 import gym
 import numpy as np
+import torch as th
 
+from stable_baselines3 import SAC
 from stable_baselines3.sac.policies import Actor
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
 from stable_baselines3.common.policies import BaseModel
-from irl.utils import pytorch_util as ptu
+
+from irl.utils import pytorch_utils as ptu
 from irl.utils import types
 
 ############################################
@@ -92,6 +95,19 @@ def action_log_prob(
     assert log_min <= log_prob <= log_max, f"log_prob {log_prob:.2f} not in bounds"
     return action, log_prob
 
+def sample_agent_action_log_prob(
+    demo_states: th.Tensor,
+    policy: OffPolicyAlgorithm,
+) -> Tuple[th.Tensor, th.Tensor]:
+    """Sample agent actions and log probabilities from demo states"""
+    if isinstance(policy, SAC):
+        policy = policy.policy.actor
+    elif isinstance(policy, Actor): 
+        policy = policy
+    else:
+        assert False, f"Policy class {type(policy)} not implemented"
+    actions, log_probs = policy.action_log_prob(demo_states)
+    return actions, log_probs
 
 def sample_trajectories(
     env: gym.Env, 
@@ -124,3 +140,12 @@ def check_demo_performance(paths):
     ) 
 
 
+def log_disc_metrics(logger, metrics):
+    for k, v in metrics.items():
+        if v.dim() < 1 or (v.dim == 1 and v.shape[0] <= 1):
+            logger.record_mean(f"Disc/{k}", v.item())
+        else:
+            logger.record_mean(f"Disc/{k}Max", th.amax(v).item())
+            logger.record_mean(f"Disc/{k}Min", th.amin(v).item())
+            logger.record_mean(f"Disc/{k}Mean", th.mean(v).item())
+            logger.record_mean(f"Disc/{k}Std", th.std(v).item())

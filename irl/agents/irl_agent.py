@@ -1,4 +1,6 @@
 from typing import Optional, List, Dict, Union, Tuple
+from tqdm import tqdm
+from collections import OrderedDict
 
 import numpy as np
 import torch as th
@@ -8,47 +10,64 @@ import torch.multiprocessing as mp
 
 import gym
 from stable_baselines3 import SAC
+from stable_baselines3.common.logger import Logger, configure
 from stable_baselines3.sac.policies import Actor
 from stable_baselines3.common.torch_layers import FlattenExtractor
 
 from irl.agents.base_agent import BaseAgent 
 from irl.rewards.reward_net import RewardNet
+import irl.planners.geometric_planner as gp 
 
-import irl.utils.pytorch_util as ptu 
-from irl.utils import utils, types, planner_utils
-from irl.utils.wrappers import IRLEnv
+import irl.utils.planner_utils as pu
+import irl.utils.pytorch_utils as ptu 
+from irl.utils import utils, types
+from irl.utils.wrappers import IRLEnv, ReacherWrapper
 from irl.utils.replay_buffer import ReplayBuffer
 
 
 class IRL_Agent(BaseAgent):
     def __init__(
         self, 
-        env: gym.Env, 
-        agent_params: Dict[str, any]
+        params: Dict[str, any]
     ) -> None:
-        super(IRL_Agent, self).__init__()
+        super().__init__()
 
         # init vars
-        self.env = env
-        self.agent_params = agent_params
+        self.params = params
+        ptu.init_gpu(use_gpu=not self.params['no_gpu'], gpu_id=self.params['which_gpu'])
+
+        self.init_env()
+        self.max_episode_steps = self.env.unwrapped.spec.max_episode_steps
+        self.logger = configure(self.params['logdir'], ["stdout", "tensorboard"])
 
         # reward function
-        self.reward = RewardNet(self.agent_params)
+        self.reward = RewardNet(self.params, self.logger)
         
         # create a wrapper env with learned reward
         self.irl_env = IRLEnv(self.env, self.reward)
 
         # actor/policy with wrapped env
-        self.policy = SAC("MlpPolicy", self.env, verbose=1)
+        self.policy = SAC("MlpPolicy", self.irl_env, verbose=1)
+        self.policy.set_logger(self.logger)
         # self.policy = self.make_actor()
-
-        self.state_dim = self.agent_params['ob_dim']
-
-        # self.planner = PendulumSSTPlanner()
-        # self.planner = Planner()
 
         # Replay buffer to hold demo transitions
         self.demo_buffer = ReplayBuffer()
+
+    def init_env(self):
+        """Load environment with fixed random seed"""
+        assert self.params['env_name'] == 'Reacher-v2', (
+            f"Environment {self.params['env_name']} not supported yet."
+        )
+        seed = self.params['seed']
+        rng = np.random.RandomState(seed)
+        env_seed = rng.randint(0, (1 << 31) - 1)
+        self.env = ReacherWrapper(gym.make(self.params['env_name']))
+        print(f"Using environment seed: {env_seed}")
+        self.env.seed(int(env_seed))
+
+        self.params['ob_dim'] = self.env.observation_space.shape[0]
+
 
     def make_actor(self):
         """Construct an actor as policy"""
@@ -67,7 +86,7 @@ class IRL_Agent(BaseAgent):
         policy = Actor(**actor_kwargs).to("cuda")
 
         from stable_baselines3.common.utils import get_schedule_fn
-        lr_schedule = get_schedule_fn(self.agent_params['learning_rate'])
+        lr_schedule = get_schedule_fn(self.params['learning_rate'])
         policy.optimizer = optim.Adam(
             policy.parameters(), 
             lr=lr_schedule(1)
@@ -75,95 +94,63 @@ class IRL_Agent(BaseAgent):
         return policy
 
     def train(self):
+        # Collect expert demonstrations and save to buffer
+        demo_paths = self.collect_demo_trajectories(
+            self.params['expert_policy'], self.params['demo_size'])
+        self.demo_buffer.add_rollouts(demo_paths)
 
-        # Sample a minibatch of expert transitions
-        demo_transitions = self.sample_transitions(self.agent_params['transitions_per_itr'])
-        demo_states = ptu.from_numpy(
-            np.stack([transition.state for transition in demo_transitions])
-        )
-        demo_next_states = ptu.from_numpy(
-            np.stack([transition.next_state for transition in demo_transitions])
-        )
+        for itr in tqdm(range(self.params['n_iter'])):    
+            # Sample expert transitions from replay buffer
+            demo_transitions = self.demo_buffer.sample_random_transitions(
+                self.params['transitions_per_itr']
+            )
+            demo_states = ptu.from_numpy(
+                np.stack([transition.state for transition in demo_transitions])
+            )
+            demo_next_states = ptu.from_numpy(
+                np.stack([transition.next_state for transition in demo_transitions])
+            )
 
-        # # Sample agent actions from expert states and compute next states
-        agent_actions_l, agent_log_probs_l = self.sample_agent_action_log_prob(demo_states)
-        agent_next_states_l = self.next_states_from_env(demo_states, agent_actions_l)
+            # Copy reward NN weight from cuda to cpu, and set up PRM planner
+            # set model to eval mode in case there are BatchNorm, Dropout layers
+            self.reward.copy_model_to_cpu()
+            self.reward.model_cpu.eval()
+            planner = gp.ReacherPRMstarPlanner()
 
-        # Copy reward NN weight from cuda to cpu, 
-        # set model to eval mode in case there are BatchNorm, Dropout layers
-        # and update to planner
-        self.reward.copy_model_to_cpu()
-        self.reward.model_cpu.eval()
+            # Plan expert paths from expert next states
+            demo_paths = pu.plan_from_states(
+                planner, 
+                demo_next_states, 
+                self.reward.cost_fn, 
+                solveTime=0.4
+            )
+            # Add first state back to each path
+            demo_paths = pu.add_states_to_paths(demo_states, demo_paths)
 
-        # Plan optimal paths from next states to goal under current reward function        
-        demo_paths = planner_utils.plan_from_states(demo_next_states, self.reward.cost_fn)
-        agent_paths_l = [
-            planner_utils.plan_from_states(agent_next_states, self.reward.cost_fn) 
-            for agent_next_states in agent_next_states_l
-        ]
+            # Optimize reward
+            for i in range(self.params['reward_updates_per_itr']):
+                # Sample agent actions with log probs and plan from agent next states
+                agent_actions, agent_log_probs = utils.sample_agent_action_log_prob(
+                    demo_states,
+                    self.policy
+                )
+                agent_paths = pu.plan_from_states(
+                    planner, 
+                    demo_next_states, 
+                    self.reward.cost_fn, 
+                    solveTime=0.05
+                )
+                agent_paths = pu.add_states_to_paths(demo_states, demo_paths)
+                self.reward.update(demo_paths, agent_paths, agent_log_probs, itr)
 
-        # Add first state back to each path
-        demo_paths = planner_utils.add_states_to_paths(demo_states, demo_paths)
-        agent_paths_l = [
-            planner_utils.add_states_to_paths(demo_states, agent_paths)
-            for agent_paths in agent_paths_l
-        ]
+            # Optimize policy
+            # policy_logs = self.train_policy(agent_paths_l, agent_log_probs_l)
+            self.train_policy()
 
-        # Optimize reward
-        reward_logs = self.reward.update(demo_paths, agent_paths_l, agent_log_probs_l)
-        # reward_logs = {"Reward/loss": 0}
-
-        # Optimize policy
-        # policy_logs = self.train_policy(agent_paths_l, agent_log_probs_l)
-        policy_logs = self.train_policy()
-
-        return reward_logs, policy_logs
-
-
-    def next_states_from_env(
-        self, 
-        states: th.Tensor, 
-        actions_l: List[th.Tensor]
-    ) -> List[th.Tensor]:
-        """Query the environment for next states"""
-        # states = ptu.to_numpy(states)
-        # actions = ptu.to_numpy(actions)
-        # next_states = []
-        # for state, action in zip(states, actions):
-        #     next_states.append(self.env.one_step_transition(state, action))
-        # return ptu.from_numpy(np.stack(next_states))
-
-        states = ptu.to_numpy(states)
-        actions_l = [ptu.to_numpy(actions) for actions in actions_l]
-        next_states_l = []
-        for actions in actions_l:
-            assert len(states) == len(actions), "Sampled actions not equal to states"
-            next_states = []
-            for state, action in zip(states, actions):
-                next_states.append(self.env.one_step_transition(state, action))
-            next_states = ptu.from_numpy(np.stack(next_states))
-            assert next_states.shape == states.shape, "Sampled next states not equal to states"
-            next_states_l.append(next_states)
-        return next_states_l
-
-    def sample_agent_action_log_prob(
-        self, 
-        demo_states: th.Tensor
-    ) -> Tuple[th.Tensor, th.Tensor]:
-        """Sample agent actions and log probabilities from demo states"""
-        if isinstance(self.policy, SAC):
-            policy = self.policy.policy.actor
-        elif isinstance(self.policy, Actor): 
-            policy = self.policy
-        else:
-            assert False, f"Policy class {type(self.policy)} not implemented"
-        action_log_prob_l = [
-            policy.action_log_prob(demo_states)
-            for _ in range(self.agent_params['agent_actions_per_demo_transition'])
-        ]
-        agent_actions, agent_log_probs = list(zip(*action_log_prob_l))
-        return agent_actions, agent_log_probs
-
+            # Perform logging
+            print('\nBeginning logging procedure...')
+            self.perform_logging(itr, self.policy)
+            self.logger.dump(itr)
 
     # def train_policy(
     #     self, 
@@ -200,19 +187,30 @@ class IRL_Agent(BaseAgent):
         Train the policy/actor using learned reward
         """
         print('\nTraining agent policy...')
-        self.policy.learn(total_timesteps=1024*4, log_interval=16)
-        train_log = {'Policy/policy_loss': 0}
-        return train_log
+        batch_size = self.params['policy_update_batch_size']
+        self.policy.learn(total_timesteps=self.max_episode_steps*batch_size, log_interval=10)
+
 
     #####################################################
     #####################################################
-    
-    def add_to_buffer(self, paths: List[np.ndarray]) -> None:
-        self.demo_buffer.add_rollouts(paths)
-
-    def sample_transitions(self, batch_size: int) -> List[types.Transition]:
-        return self.demo_buffer.sample_random_transitions(batch_size)
-
+    def collect_demo_trajectories(
+        self, 
+        expert_policy: str, 
+        batch_size: int 
+    ):
+        """
+        :param expert_policy:  relative path to saved expert policy
+        :return:
+            paths: a list of trajectories
+        """
+        from stable_baselines3 import SAC
+        expert_policy = SAC.load(expert_policy)
+        print('\nRunning expert policy to collect demonstrations...')
+        demo_paths = utils.sample_trajectories(
+            self.env, expert_policy, batch_size
+        )
+        utils.check_demo_performance(demo_paths)
+        return demo_paths
 
     def eval_on_replay_buffer(
         self, 
@@ -246,3 +244,25 @@ class IRL_Agent(BaseAgent):
 
         return paths, np.array(log_probs)
 
+    def perform_logging(self, itr, eval_policy):
+
+        #######################
+        # Evaluate the agent policy in true environment
+        print("\nCollecting data for eval...")
+        eval_paths = utils.sample_trajectories(
+            self.env, eval_policy, 
+            self.params['eval_batch_size']
+        )  
+
+        eval_returns = [path.rewards.sum() for path in eval_paths]
+        eval_ep_lens = [len(path) for path in eval_paths]
+
+        logs = OrderedDict()
+        logs["Eval/AverageReturn"] = np.mean(eval_returns)
+        logs["Eval/StdReturn"] = np.std(eval_returns)
+        logs["Eval/MaxReturn"] = np.max(eval_returns)
+        logs["Eval/MinReturn"] = np.min(eval_returns)
+        logs["Eval/AverageEpLen"] = np.mean(eval_ep_lens)
+
+        for key, value in logs.items():
+            self.logger.record(key, value)

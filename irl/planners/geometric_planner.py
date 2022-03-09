@@ -84,7 +84,6 @@ class ReacherRRTstarPlanner(ReacherGeometricPlanner):
 class ReacherPRMstarPlanner(ReacherGeometricPlanner):
     def __init__(self):
         super().__init__()
-
         self.planner = og.PRMstar(self.si)
         #TODO: check planner range for PRM and PRMstar
         # self.planner.setRange(1.0)
@@ -95,16 +94,21 @@ class ReacherPRMstarPlanner(ReacherGeometricPlanner):
         start: np.ndarray, 
         goal: np.ndarray,
         solveTime: Optional[float] = 1.0,
-        total_solveTime: Optional[float] = 10.0
+        total_solveTime: Optional[float] = 10.0,
+        clear: Optional[bool] = False,
+        debug: Optional[bool] = False
     ) -> Tuple[int, np.ndarray, np.ndarray]:
         """
         Return a list of states and controls (None for geometric planners)
         """
-        # Clear previous query and set new start and goal states
-        # self.ss.clearQuery()
-        # self.ss.getPlanner().clearQuery()
-        # self.ss.clear()
-        self.planner.clearQuery()
+
+        if clear:
+            self.ss.clear()
+        else:
+            # Clear previous query without clearning planning data
+            # Important: Must also clear previous solutions 
+            self.planner.clearQuery()
+            self.ss.getProblemDefinition().clearSolutionPaths()
         self.ss.setStartState(self.get_StartState(start))        
         self.ss.setGoal(self.get_Goal(self.si, goal))
 
@@ -122,12 +126,13 @@ class ReacherPRMstarPlanner(ReacherGeometricPlanner):
             geometric_path = self.ss.getSolutionPath()
             geometric_path.interpolate()
             states = geometric_path.getStates()
-            print(
-                f"{msg}: "
-                f"Path length is {geometric_path.length():.2f}, "
-                f"cost is {geometric_path.cost(objective).value():.2f}, ",
-                f"solve time is {t:.2f}"
-            )
+            if debug:
+                print(
+                    f"{msg}: "
+                    f"Path length is {geometric_path.length():.2f}, "
+                    f"cost is {geometric_path.cost(objective).value():.2f}, ",
+                    f"solve time is {t:.2f}"
+                )
             states = planner_utils.states_to_numpy(states)
             return status.asString(), states, None
         else:

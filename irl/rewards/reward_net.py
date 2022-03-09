@@ -6,17 +6,25 @@ import torch as th
 from torch import nn
 from torch import optim
 
-import irl.utils.pytorch_util as ptu
-from irl.utils import planner_utils
+from stable_baselines3.common.logger import Logger
+
+import irl.utils.pytorch_utils as ptu
+import irl.utils.planner_utils as pu
+from irl.utils import utils
 
 class RewardNet(nn.Module):
     """
     Defines a reward function given the current observation and action
     """
-    def __init__(self, reward_params: Dict[str, Union[float, int]]):
+    def __init__(
+        self, 
+        reward_params: Dict[str, Union[float, int]],
+        logger: Logger
+    ):
         super().__init__()
 
         self.reward_params = reward_params
+        self.logger = logger
 
         self.device = th.device("cuda")
         self.device_cpu = th.device("cpu")
@@ -33,33 +41,32 @@ class RewardNet(nn.Module):
     def init_model(self, device: Optional[th.device] = th.device("cuda")) -> nn.Module:
         """Initialize reward neural network"""
         model = ptu.build_mlp(
-            # input_size=self.reward_params['ob_dim'] * 2,
-            input_size=6*2,
+            input_size=self.reward_params['ob_dim'] * 2,
             output_size=self.reward_params['output_size'],
             n_layers=self.reward_params['n_layers'],
             size=self.reward_params['size'],
             activation='relu',
-            output_activation='relu'
+            output_activation=self.reward_params['output_activation']
         ).to(device)
         return model 
 
     def forward(
-            self, 
-            model: nn.Module, 
-            x1: np.ndarray, 
-            x2: np.ndarray
-        ) -> th.FloatTensor:
+        self, 
+        model: nn.Module, 
+        x1: np.ndarray, 
+        x2: np.ndarray
+    ) -> th.FloatTensor:
         """Computes the reward of motion from x1 to x2 with an MLP"""
         x = th.cat((x1, x2), dim=-1)
         r = -model(x)
         return r
 
     def preprocess_input(
-            self,
-            x1: np.ndarray,
-            x2: np.ndarray,
-            device: Optional[th.device] = th.device('cuda')
-        ) -> Union[th.Tensor]:
+        self,
+        x1: np.ndarray,
+        x2: np.ndarray,
+        device: Optional[th.device] = th.device('cuda')
+    ) -> Union[th.Tensor]:
         """Load numpy array to torch tensors on cpu or cuda"""
         if len(x1.shape) < 2 or len(x2.shape) < 2:
             x1 = x1.reshape(1, self.reward_params['ob_dim'])
@@ -85,8 +92,10 @@ class RewardNet(nn.Module):
         Compute reward for motion between state x1 and next state x2
         """
         with th.no_grad():
-            x1, x2 = self.preprocess_input(x1, x2, self.device_cpu)
-            reward = self(self.model_cpu, x1, x2)
+            # x1, x2 = self.preprocess_input(x1, x2, self.device_cpu)
+            # reward = self(self.model_cpu, x1, x2)
+            x1, x2 = self.preprocess_input(x1, x2, self.device)
+            reward = self(self.model, x1, x2)
         return reward.item()
 
     def gail_reg(self, path):
@@ -190,59 +199,45 @@ class RewardNet(nn.Module):
     def update(
         self,
         demo_paths: List[th.Tensor],
-        agent_paths_l: List[List[th.Tensor]],
-        agent_log_probs_l: List[th.Tensor]
+        agent_paths: List[th.Tensor],
+        agent_log_probs: th.Tensor,
+        itr
     ) -> Dict[str, float]:
         """Optimize reward neural network"""
 
         # Compute Q values for expert paths
-        demo_Qs = th.cat([self.compute_Q(path) for path in demo_paths])
+        demo_Q = th.cat([self.compute_Q(path) for path in demo_paths])
 
         # Compute Q values for agent paths
-        agent_Qs, agent_lse_Qs = [], []
-        for i in range(len(demo_paths)):
-            agent_Q = th.cat([self.compute_Q(paths[i]) for paths in agent_paths_l])
-            agent_log_prob = th.stack([log_probs[i] for log_probs in agent_log_probs_l])
+        agent_Q = th.cat([self.compute_Q(path) for path in agent_paths])
+        # agent_lse_Q = th.logsumexp(agent_Q - agent_log_probs, dim=0, keepdim=True)
 
-            assert agent_Q.shape == agent_log_prob.shape
-            agent_Q = th.mean(agent_Q, dim=0, keepdim=True)
-            agent_lse_Q = th.logsumexp(agent_Q - agent_log_prob, dim=0, keepdim=True)
-
-            agent_Qs.append(agent_Q)
-            agent_lse_Qs.append(agent_lse_Q)
-        
         # Reward loss
-        demo_Qs = th.mean(demo_Qs)
-        agent_Qs = th.mean(th.cat(agent_lse_Qs, dim=0))
-        reward_loss = - demo_Qs + agent_Qs
+        loss = th.mean(-demo_Q + agent_Q - agent_log_probs)
+
+        # Log metrics
+        metrics = {
+            'Loss': loss,
+            'demo_Q': demo_Q,
+            'agent_Q': agent_Q,
+            'agent_log_probs': agent_log_probs,
+        }
+        utils.log_disc_metrics(self.logger, metrics)
+        self.logger.dump(itr)
 
         # Reward regularization
-        gail_reg_loss = th.mean(
-            th.cat([self.gail_reg(path) for path in demo_paths], dim=0)
-        )
-        squared_reg_loss = th.mean(
-            th.cat([self.squared_reg(path) for path in demo_paths]), dim=0
-        )
+        # gail_reg_loss = th.mean(
+        #     th.cat([self.gail_reg(path) for path in demo_paths], dim=0)
+        # )
+        # squared_reg_loss = th.mean(
+        #     th.cat([self.squared_reg(path) for path in demo_paths]), dim=0
+        # )
 
-        loss = reward_loss + squared_reg_loss
+        # loss = reward_loss + squared_reg_loss
 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-
-        train_reward_log = {
-            "Reward/loss": loss.item(),
-            "Reward/demo_Q": np.mean(ptu.to_numpy(demo_Qs)),
-            "Reward/agent_Q": np.mean(ptu.to_numpy(agent_Qs)),
-            "Reward/agent_log_prob": np.mean(ptu.to_numpy(th.cat(agent_log_probs_l))),
-            "Reward/reward_loss": ptu.to_numpy(reward_loss), 
-            "Reward/gail_reg_loss": ptu.to_numpy(gail_reg_loss),
-            "Reward/squared_reg_loss": ptu.to_numpy(squared_reg_loss),
-        }
-
-        for loss_name, loss_val in train_reward_log.items():
-            print(loss_name, f"{loss_val:.2f}")
-        return train_reward_log
 
     # def compute_Q(
     #         self, 
@@ -269,12 +264,10 @@ class RewardNet(nn.Module):
         debug: Optional[bool] = False
     ) -> th.Tensor:
         """Compute the Q value of a path"""
-
         if debug:
             Q = ptu.from_numpy(np.zeros(1))
-
             for state in path:            
-                fingertip = planner_utils.compute_xy_from_angles(state[0].item(), state[1].item())
+                fingertip = pu.compute_xy_from_angles(state[0].item(), state[1].item())
                 fingertip = ptu.from_numpy(np.array(fingertip))
                 c = th.linalg.norm(fingertip - state[-2:])
                 Q += th.linalg.norm(fingertip - state[-2:]) #+ th.linalg.norm(state[2:4])

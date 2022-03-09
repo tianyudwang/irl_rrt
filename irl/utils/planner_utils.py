@@ -16,7 +16,7 @@ import torch as th
 # import torch.multiprocessing as mp 
 import irl.planners.geometric_planner as gp
 import irl.planners.control_planner as cp
-import irl.utils.pytorch_util as ptu
+import irl.utils.pytorch_utils as ptu
 from irl.utils.wrappers import ReacherWrapper
 
 PlannerStatus = {
@@ -224,39 +224,62 @@ def color_status(status):
     return colorize(status.asString(), status2color[status.getStatus()])
 
 ##################################################################
+# Planning
+##################################################################
+def next_states_from_env(
+    env: gym.Env, 
+    states: th.Tensor, 
+    actions_l: List[th.Tensor]
+) -> List[th.Tensor]:
+    """Query the environment for next states"""
+    # states = ptu.to_numpy(states)
+    # actions = ptu.to_numpy(actions)
+    # next_states = []
+    # for state, action in zip(states, actions):
+    #     next_states.append(self.env.one_step_transition(state, action))
+    # return ptu.from_numpy(np.stack(next_states))
 
+    states = ptu.to_numpy(states)
+    actions_l = [ptu.to_numpy(actions) for actions in actions_l]
+    next_states_l = []
+    for actions in actions_l:
+        assert len(states) == len(actions), "Sampled actions not equal to states"
+        next_states = []
+        for state, action in zip(states, actions):
+            next_states.append(env.one_step_transition(state, action))
+        next_states = ptu.from_numpy(np.stack(next_states))
+        assert next_states.shape == states.shape, "Sampled next states not equal to states"
+        next_states_l.append(next_states)
+    return next_states_l
 
 def plan_from_states(
+    planner: gp.ReacherGeometricPlanner,
     states: th.Tensor,
-    cost_fn: Callable[[np.ndarray], np.ndarray]
+    cost_fn: Callable[[np.ndarray, np.ndarray], float],
+    solveTime: Optional[float] = 1.0,
 ) -> List[th.Tensor]:
     """Construct planner instance for each start location"""
     states = [ptu.to_numpy(state) for state in states]
-    # args = [[state, cost_fn] for state in states]
-    # with mp.Pool(os.cpu_count()-1) as pool:
-    #     results = pool.starmap(plan_from_state, args)
-    # status, paths, controls = list(zip(*results))
-    # paths = [ptu.from_numpy(path) for path in paths]
-
     paths = []
     for state in states:
-        status, path, control = plan_from_state(state, cost_fn)
+        status, path, control = plan_from_state(planner, state, cost_fn, solveTime)
         paths.append(path)
     paths = [ptu.from_numpy(path) for path in paths]
     return paths
 
 def plan_from_state(
+    planner: gp.ReacherGeometricPlanner,
     state: np.ndarray,
-    cost_fn: Callable[[np.ndarray], np.ndarray]
+    cost_fn: Callable[[np.ndarray, np.ndarray], float],
+    solveTime: Optional[float] = 1.0,
 ) -> Tuple[str, np.ndarray, np.ndarray]:
     # Construct env and planner
     start = state[:4].astype(np.float64) 
     target = state[-2:].astype(np.float64)
 
-    planner = gp.ReacherRRTstarPlanner()
+    # Each planning problem has a different goal, need to update cost function
     planner.update_ss_cost(cost_fn, target)
-
-    status, path, control = planner.plan(start, target, solveTime=0.2)
+    status, path, control = planner.plan(start, target, solveTime=solveTime)
     assert status in PlannerStatus.keys(), f"Planner failed with status {status}"
     # assert len(path) == len(control) + 1, (
     #     f"Path length {len(path)} does not match control length {len(control)}"
@@ -278,7 +301,7 @@ def add_states_to_paths(
     assert len(states) == len(paths), (
         f"Lengths of state {len(states)} and paths {len(paths)} are not equal"
     )
-    states = th.cat([states[:,:4], states[:,-2:]], dim=1)
+    # states = th.cat([states[:,:4], states[:,-2:]], dim=1)
     padded_paths = [
         th.cat((state.reshape(1, -1), path), dim=0) 
         for state, path in zip(states, paths)

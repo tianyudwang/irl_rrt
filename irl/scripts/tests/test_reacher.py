@@ -165,6 +165,10 @@ def test_reacher_RRTstar_planner():
         )
 
 def test_reacher_PRMstar_planner():
+    """
+    OMPL PRM style planners do not support multiple queries. 
+    clearQuery() function does not clear start and goal from previous planning.
+    """
     env_name = "Reacher-v2"
     env = gym.make(env_name)
     env = ReacherWrapper(env)
@@ -173,14 +177,18 @@ def test_reacher_PRMstar_planner():
     for _ in range(10):
         obs = env.reset()
         start = obs[:4].astype(np.float64)
-        # target = obs[-2:].astype(np.float64)
-        target = np.array([-0.21, 0], dtype=np.float64)
+        target = obs[-2:].astype(np.float64)
+        # target = np.array([-0.21, 0], dtype=np.float64)
         status, states, controls = planner.plan(start=start, goal=target)
 
         print(start, states[0])
+        print(f"Start state {start}")
+        print(f"First state from planner {states[0]}")
         print(f"Start state distance {np.linalg.norm(states[0] - start):.2f}")
+        print(f"Last state from planner {states[-1]}")
+        print(f"Target location {target}")
 
-        print(states)
+        # print(states)
         finger_pos = planner_utils.compute_xy_from_angles(states[-1][0], states[-1][1])
         dist = np.linalg.norm(target - finger_pos)
         print(f"Final state fingertip dist {dist:.2f}")
@@ -196,85 +204,84 @@ def test_reacher_PRMstar_planner():
             env.set_state(qpos, qvel)
             env.render()
             time.sleep(0.01)
-        import ipdb; ipdb.set_trace()
 
-        # if dist >= 0.02:
-        #     import ipdb; ipdb.set_trace()
-        # assert dist <= 0.05, (
-        #     f"Reacher finger position {states[-1]} does not reach target at {target}",
-        #     f"Distance to target is {dist}"
-        # )
-
-def test_reacher_SST_planner():
-    """
-    Path returned by planner does not match exactly the rollout path from controls
-    Major discrepancy in angle and angular velocity in joint1 (the second arm)
-    """
-    assert False, "This test function does not work"
-    env_name = "Reacher-v2"
-    env = gym.make(env_name)
-    env = ReacherWrapper(env)
-
-    planner = cp.ReacherSSTPlanner(env.unwrapped)
-    for _ in range(10):
-        obs = env.reset()
-        qpos = env.unwrapped.sim.data.qpos.flat[:].copy()
-        qvel = env.unwrapped.sim.data.qvel.flat[:].copy()
-        start = obs[:-2].astype(np.float64)
-        target = obs[-2:].astype(np.float64)
-        status, states, controls = planner.plan(start=start, goal=target)
-
-        finger_pos = states[-1][-2:]
-        dist = np.linalg.norm(target - finger_pos)
-        assert dist <= 0.01, (
-            f"Reacher state {states[-1]} does not reach target at {target} \n"
+        if dist >= 0.02:
+            import ipdb; ipdb.set_trace()
+        assert dist <= 0.05, (
+            f"Reacher finger position {states[-1]} does not reach target at {target}",
             f"Distance to target is {dist}"
         )
 
-        env.reset()
-        env.set_state(qpos, qvel)
-        new_obs = env._get_obs()
-        assert np.allclose(obs, new_obs)
+# def test_reacher_SST_planner():
+#     """
+#     Path returned by planner does not match exactly the rollout path from controls
+#     Major discrepancy in angle and angular velocity in joint1 (the second arm)
+#     """
+#     assert False, "This test function does not work"
+#     env_name = "Reacher-v2"
+#     env = gym.make(env_name)
+#     env = ReacherWrapper(env)
 
-        # env.render()
-        rollout_states = [obs]
-        for j in range(len(controls)):
-            control = controls[j]
-            obs, _, _, _ = env.step(control)
-            # env.render()
-            rollout_states.append(obs)
-        rollout_states = np.array(rollout_states)
+#     planner = cp.ReacherSSTPlanner(env.unwrapped)
+#     for _ in range(10):
+#         obs = env.reset()
+#         qpos = env.unwrapped.sim.data.qpos.flat[:].copy()
+#         qvel = env.unwrapped.sim.data.qvel.flat[:].copy()
+#         start = obs[:-2].astype(np.float64)
+#         target = obs[-2:].astype(np.float64)
+#         status, states, controls = planner.plan(start=start, goal=target)
 
-        assert len(rollout_states) == len(states)
-        if np.linalg.norm(rollout_states[:, :6] - states) >= 0.1:   
-            import ipdb; ipdb.set_trace()
-        # assert np.linalg.norm(rollout_states[:, :6] - states) < 0.1
+#         finger_pos = states[-1][-2:]
+#         dist = np.linalg.norm(target - finger_pos)
+#         assert dist <= 0.01, (
+#             f"Reacher state {states[-1]} does not reach target at {target} \n"
+#             f"Distance to target is {dist}"
+#         )
+
+#         env.reset()
+#         env.set_state(qpos, qvel)
+#         new_obs = env._get_obs()
+#         assert np.allclose(obs, new_obs)
+
+#         # env.render()
+#         rollout_states = [obs]
+#         for j in range(len(controls)):
+#             control = controls[j]
+#             obs, _, _, _ = env.step(control)
+#             # env.render()
+#             rollout_states.append(obs)
+#         rollout_states = np.array(rollout_states)
+
+#         assert len(rollout_states) == len(states)
+#         if np.linalg.norm(rollout_states[:, :6] - states) >= 0.1:   
+#             import ipdb; ipdb.set_trace()
+#         # assert np.linalg.norm(rollout_states[:, :6] - states) < 0.1
 
 
-def eval(env, model):
-    rews = []
-    n_eval = 64
-    for i in range(n_eval):
-        obs = env.reset()
-        done = False
-        rewards = []
-        while not done:
-            action, _states = model.predict(obs, deterministic=True)
-            obs, reward, done, info = env.step(action)
-            rewards.append(reward)
-        rews.append(rewards)    
+# def eval(env, model):
+#     rews = []
+#     n_eval = 64
+#     for i in range(n_eval):
+#         obs = env.reset()
+#         done = False
+#         rewards = []
+#         while not done:
+#             action, _states = model.predict(obs, deterministic=True)
+#             obs, reward, done, info = env.step(action)
+#             rewards.append(reward)
+#         rews.append(rewards)    
 
-    lengths = [len(rew) for rew in rews]
-    returns = [sum(rew) for rew in rews]
-    print(f"Reacher-v2 {n_eval} episodes")
-    print(f"Episode return {np.mean(returns):.2f} +/- {np.std(returns):.2f}")
-    print(f"Episode length {np.mean(lengths):.2f} +/- {np.std(lengths):.2f}")
+#     lengths = [len(rew) for rew in rews]
+#     returns = [sum(rew) for rew in rews]
+#     print(f"Reacher-v2 {n_eval} episodes")
+#     print(f"Episode return {np.mean(returns):.2f} +/- {np.std(returns):.2f}")
+#     print(f"Episode length {np.mean(lengths):.2f} +/- {np.std(lengths):.2f}")
 
 if __name__ == '__main__':
     # test_compute_xy_from_angles()
     # test_compute_angles_from_xy()
     # test_reacher_fingertip()
-    test_reacher_RRTstar_planner()
-    # test_reacher_PRMstar_planner()
+    # test_reacher_RRTstar_planner()
+    test_reacher_PRMstar_planner()
     # test_reacher_SST_planner()
     # test_reacher_StatePropagator()
