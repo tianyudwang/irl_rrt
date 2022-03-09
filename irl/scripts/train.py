@@ -44,6 +44,7 @@ def main():
     parser.add_argument('--output_size', type=int, default=1)
     parser.add_argument('--output_activation', '-oa', type=str, default='relu')
     parser.add_argument('--learning_rate', '-lr', type=float, default=1e-3)
+    parser.add_argument('--weight_decay', '-wd', type=float, default=0)
     parser.add_argument('--lcr_reg', type=float, default=0)
     parser.add_argument('--gail_reg', type=float, default=0)
 

@@ -35,7 +35,7 @@ class RewardNet(nn.Module):
         self.optimizer = optim.Adam(
             self.model.parameters(),
             lr=self.reward_params['learning_rate'],
-            weight_decay=0.1,
+            weight_decay=self.reward_params['weight_decay'],
         )
 
     def init_model(self, device: Optional[th.device] = th.device("cuda")) -> nn.Module:
