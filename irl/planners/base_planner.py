@@ -70,6 +70,7 @@ class ReacherBasePlanner:
         # 2 joint torque
         self.control_dim = 2
         ou.setLogLevel(ou.LogLevel.LOG_ERROR)
+        # ou.setLogLevel(ou.LogLevel.LOG_WARN)
 
     def get_StateSpace(self) -> ob.StateSpace:
         """

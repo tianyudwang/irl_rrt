@@ -143,9 +143,9 @@ def check_demo_performance(paths):
 def log_disc_metrics(logger, metrics):
     for k, v in metrics.items():
         if v.dim() < 1 or (v.dim == 1 and v.shape[0] <= 1):
-            logger.record_mean(f"Disc/{k}", v.item())
+            logger.record_mean(f"Reward/{k}", v.item())
         else:
-            logger.record_mean(f"Disc/{k}Max", th.amax(v).item())
-            logger.record_mean(f"Disc/{k}Min", th.amin(v).item())
-            logger.record_mean(f"Disc/{k}Mean", th.mean(v).item())
-            logger.record_mean(f"Disc/{k}Std", th.std(v).item())
+            logger.record_mean(f"Reward/{k}Max", th.amax(v).item())
+            logger.record_mean(f"Reward/{k}Min", th.amin(v).item())
+            logger.record_mean(f"Reward/{k}Mean", th.mean(v).item())
+            logger.record_mean(f"Reward/{k}Std", th.std(v).item())

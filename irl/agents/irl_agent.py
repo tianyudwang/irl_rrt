@@ -122,7 +122,7 @@ class IRL_Agent(BaseAgent):
                 planner, 
                 demo_next_states, 
                 self.reward.cost_fn, 
-                solveTime=0.4
+                solveTime=0.2
             )
             # Add first state back to each path
             demo_paths = pu.add_states_to_paths(demo_states, demo_paths)
@@ -134,14 +134,32 @@ class IRL_Agent(BaseAgent):
                     demo_states,
                     self.policy
                 )
+                agent_next_states = pu.next_states_from_env(self.env, demo_states, agent_actions)
                 agent_paths = pu.plan_from_states(
                     planner, 
-                    demo_next_states, 
+                    agent_next_states, 
                     self.reward.cost_fn, 
-                    solveTime=0.05
+                    solveTime=0.02
                 )
-                agent_paths = pu.add_states_to_paths(demo_states, demo_paths)
+                agent_paths = pu.add_states_to_paths(demo_states, agent_paths)
                 self.reward.update(demo_paths, agent_paths, agent_log_probs, itr)
+
+                # # Multiple agent actions sampled per expert transition
+                # # Sample agent actions with log probs and plan from agent next states
+                # agent_paths_l, agent_log_probs_l = [], []
+                # for j in range(self.params['agent_actions_per_demo_transition']):
+                #     agent_actions, agent_log_probs = utils.sample_agent_action_log_prob(
+                #         demo_states,
+                #         self.policy
+                #     )
+                #     agent_paths = pu.plan_from_states(
+                #         planner, 
+                #         demo_next_states, 
+                #         self.reward.cost_fn, 
+                #         solveTime=0.05
+                #     )
+                #     agent_paths = pu.add_states_to_paths(demo_states, demo_paths)
+                # self.reward.update(demo_paths, agent_paths, agent_log_probs, itr)
 
             # Optimize policy
             # policy_logs = self.train_policy(agent_paths_l, agent_log_probs_l)

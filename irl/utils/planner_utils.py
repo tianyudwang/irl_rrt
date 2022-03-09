@@ -226,31 +226,37 @@ def color_status(status):
 ##################################################################
 # Planning
 ##################################################################
+# def next_states_from_env(
+#     env: gym.Env, 
+#     states: th.Tensor, 
+#     actions_l: List[th.Tensor]
+# ) -> List[th.Tensor]:
+#     """Query the environment for next states"""
+#     states = ptu.to_numpy(states)
+#     actions_l = [ptu.to_numpy(actions) for actions in actions_l]
+#     next_states_l = []
+#     for actions in actions_l:
+#         assert len(states) == len(actions), "Sampled actions not equal to states"
+#         next_states = []
+#         for state, action in zip(states, actions):
+#             next_states.append(env.one_step_transition(state, action))
+#         next_states = ptu.from_numpy(np.stack(next_states))
+#         assert next_states.shape == states.shape, "Sampled next states not equal to states"
+#         next_states_l.append(next_states)
+#     return next_states_l
+
 def next_states_from_env(
     env: gym.Env, 
     states: th.Tensor, 
-    actions_l: List[th.Tensor]
-) -> List[th.Tensor]:
+    actions: th.Tensor
+) -> th.Tensor:
     """Query the environment for next states"""
-    # states = ptu.to_numpy(states)
-    # actions = ptu.to_numpy(actions)
-    # next_states = []
-    # for state, action in zip(states, actions):
-    #     next_states.append(self.env.one_step_transition(state, action))
-    # return ptu.from_numpy(np.stack(next_states))
-
     states = ptu.to_numpy(states)
-    actions_l = [ptu.to_numpy(actions) for actions in actions_l]
-    next_states_l = []
-    for actions in actions_l:
-        assert len(states) == len(actions), "Sampled actions not equal to states"
-        next_states = []
-        for state, action in zip(states, actions):
-            next_states.append(env.one_step_transition(state, action))
-        next_states = ptu.from_numpy(np.stack(next_states))
-        assert next_states.shape == states.shape, "Sampled next states not equal to states"
-        next_states_l.append(next_states)
-    return next_states_l
+    actions = ptu.to_numpy(actions)
+    next_states = []
+    for state, action in zip(states, actions):
+        next_states.append(env.one_step_transition(state, action))
+    return ptu.from_numpy(np.stack(next_states))
 
 def plan_from_states(
     planner: gp.ReacherGeometricPlanner,
@@ -281,9 +287,10 @@ def plan_from_state(
     planner.update_ss_cost(cost_fn, target)
     status, path, control = planner.plan(start, target, solveTime=solveTime)
     assert status in PlannerStatus.keys(), f"Planner failed with status {status}"
-    # assert len(path) == len(control) + 1, (
-    #     f"Path length {len(path)} does not match control length {len(control)}"
-    # )
+    # Check planned path makes fingertip reach target xy
+    # finger_pos = compute_xy_from_angles(path[-1][0], path[-1][1])
+    # dist = np.linalg.norm(target - finger_pos)
+    # assert dist < 1e-1, f"Final state fingertip distance to target {dist:.3f}"
 
     # Need to pad target position back to each state
     path = np.concatenate((
