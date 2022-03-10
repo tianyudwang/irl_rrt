@@ -315,3 +315,19 @@ def add_states_to_paths(
     ]
     return padded_paths
 
+def fixed_horizon_paths(
+    paths: List[th.Tensor],
+    T: int
+) -> th.Tensor:
+    fixed_paths = []
+    for path in paths:
+        if len(path) >= T:
+            fixed_paths.append(path[:T])
+        else:
+            padded = th.tile(path[-1], dims=(T-len(path), 1))
+            import ipdb; ipdb.set_trace()
+            fixed_paths.append(th.cat((path, padded), dim=0))
+    import ipdb; ipdb.set_trace()
+    fixed_paths = th.stack()
+
+    return fixed_paths

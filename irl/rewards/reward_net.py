@@ -193,65 +193,30 @@ class RewardNet(nn.Module):
     #     print("\n", output_str)
     #     return train_reward_log
 
-    # def update(
-    #     self,
-    #     demo_paths: List[th.Tensor],
-    #     agent_paths_l: List[List[th.Tensor]],
-    #     agent_log_probs_l: List[th.Tensor],
-    #     itr
-    # ):
-    #     # Compute Q values for expert paths
-    #     demo_Q = th.cat([self.compute_Q(path) for path in demo_paths])
-
-    #     # agent_paths is a list of length M
-    #     agent_Qs = []
-    #     for agent_paths in agent_paths_l:
-    #         agent_Q = th.cat([self.compute_Q(path) for path in agent_paths])
-    #         agent_Qs.append(agent_Q)
-        
-    #     import ipdb; ipdb.set_trace()
-    #     agent_Qs = th.cat(agent_Qs)
-    #     agent_log_probs = th.cat(agent_log_probs)
-
-    #     loss = th.mean(-demo_Q + th.logsumexp(agent_Qs - agent_log_probs, dim=0))
-    #     self.optimizer.zero_grad()
-    #     loss.backward()
-    #     self.optimizer.step()
-
-    #     metrics = {
-    #         'Loss': loss
-    #         'demo_Q': demo_Q,
-    #         'agent_Q': agent_Q,
-    #         'agent_log_probs': agent_log_probs,
-    #     }
-    #     utils.log_disc_metrics(self.logger, metrics)
-    #     self.logger.dump(itr)
-
-
-
     def update(
         self,
         demo_paths: List[th.Tensor],
-        agent_paths: List[th.Tensor],
-        agent_log_probs: th.Tensor,
+        agent_paths_l: List[List[th.Tensor]],
+        agent_log_probs_l: List[th.Tensor],
         itr
     ):
-        """Optimize reward neural network"""
-
         # Compute Q values for expert paths
         demo_Q = th.cat([self.compute_Q(path) for path in demo_paths])
 
-        # Compute Q values for agent paths
-        agent_Q = th.cat([self.compute_Q(path) for path in agent_paths])
-        # agent_lse_Q = th.logsumexp(agent_Q - agent_log_probs, dim=0, keepdim=True)
+        # agent_paths is a list of length M
+        agent_Qs = []
+        for agent_paths in agent_paths_l:
+            agent_Q = th.cat([self.compute_Q(path) for path in agent_paths])
+            agent_Qs.append(agent_Q)
+        
+        agent_Qs = th.stack(agent_Qs, dim=0)
+        agent_log_probs = th.stack(agent_log_probs_l, dim=0)
 
-        # Reward loss
-        loss = th.mean(-demo_Q + agent_Q - agent_log_probs)
+        loss = th.mean(-demo_Q + th.logsumexp(agent_Qs - agent_log_probs, dim=0))
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-        # Log metrics
         metrics = {
             'Loss': loss,
             'demo_Q': demo_Q,
@@ -260,6 +225,40 @@ class RewardNet(nn.Module):
         }
         utils.log_disc_metrics(self.logger, metrics)
         self.logger.dump(itr)
+
+
+
+    # def update(
+    #     self,
+    #     demo_paths: List[th.Tensor],
+    #     agent_paths: List[th.Tensor],
+    #     agent_log_probs: th.Tensor,
+    #     itr
+    # ):
+    #     """Optimize reward neural network"""
+
+    #     # Compute Q values for expert paths
+    #     demo_Q = th.cat([self.compute_Q(path) for path in demo_paths])
+
+    #     # Compute Q values for agent paths
+    #     agent_Q = th.cat([self.compute_Q(path) for path in agent_paths])
+    #     # agent_lse_Q = th.logsumexp(agent_Q - agent_log_probs, dim=0, keepdim=True)
+
+    #     # Reward loss
+    #     loss = th.mean(-demo_Q + agent_Q - agent_log_probs)
+    #     self.optimizer.zero_grad()
+    #     loss.backward()
+    #     self.optimizer.step()
+
+    #     # Log metrics
+    #     metrics = {
+    #         'Loss': loss,
+    #         'demo_Q': demo_Q,
+    #         'agent_Q': agent_Q,
+    #         'agent_log_probs': agent_log_probs,
+    #     }
+    #     utils.log_disc_metrics(self.logger, metrics)
+    #     self.logger.dump(itr)
 
         # Reward regularization
         # gail_reg_loss = th.mean(

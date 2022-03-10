@@ -19,12 +19,16 @@ def main():
         help='Number of expert paths to add to replay buffer'
     )
     parser.add_argument(
-        '--reward_updates_per_itr', type=int, default=1,
+        '--reward_updates_per_itr', type=int, default=4,
         help='Number of reward updates per iteration'
     )    
     parser.add_argument(
         '--transitions_per_itr', type=int, default=32,
         help='Number of expert transitions to sample per iteration'
+    )
+    parser.add_argument(
+        '--agent_actions_per_demo_transition', type=int, default=8,
+        help='Number of agent actions/paths to sample per expert transition'
     )
     parser.add_argument(
         '--policy_update_batch_size', type=int, default=32,
