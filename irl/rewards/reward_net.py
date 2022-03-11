@@ -195,36 +195,73 @@ class RewardNet(nn.Module):
 
     def update(
         self,
-        demo_paths: List[th.Tensor],
-        agent_paths_l: List[List[th.Tensor]],
-        agent_log_probs_l: List[th.Tensor],
+        demo_paths: th.Tensor,
+        agent_paths: th.Tensor,
+        agent_log_probs: th.Tensor,
         itr
     ):
-        # Compute Q values for expert paths
-        demo_Q = th.cat([self.compute_Q(path) for path in demo_paths])
+        """
+        demo_paths and agent_paths: batch_size x T x state_dim
+        agent_log_probs: batch_size x 1
+        """
+        states, next_states = demo_paths[:,:-1], demo_paths[:,1:]
+        reward = self(self.model, states, next_states)
+        demo_Q = th.sum(reward, dim=1)
 
-        # agent_paths is a list of length M
-        agent_Qs = []
-        for agent_paths in agent_paths_l:
-            agent_Q = th.cat([self.compute_Q(path) for path in agent_paths])
-            agent_Qs.append(agent_Q)
-        
-        agent_Qs = th.stack(agent_Qs, dim=0)
-        agent_log_probs = th.stack(agent_log_probs_l, dim=0)
+        states, next_states = agent_paths[:,:-1], agent_paths[:,1:]
+        reward = self(self.model, states, next_states)
+        agent_Q = th.sum(reward, dim=1)
 
-        loss = th.mean(-demo_Q + th.logsumexp(agent_Qs - agent_log_probs, dim=0))
+        # Reward loss
+        loss = th.mean(-demo_Q + agent_Q - agent_log_probs)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
+        # Log metrics
         metrics = {
             'Loss': loss,
             'demo_Q': demo_Q,
             'agent_Q': agent_Q,
             'agent_log_probs': agent_log_probs,
+            'Q_diff': demo_Q - agent_Q
         }
         utils.log_disc_metrics(self.logger, metrics)
         self.logger.dump(itr)
+
+
+    # def update(
+    #     self,
+    #     demo_paths: List[th.Tensor],
+    #     agent_paths_l: List[List[th.Tensor]],
+    #     agent_log_probs_l: List[th.Tensor],
+    #     itr
+    # ):
+    #     # Compute Q values for expert paths
+    #     demo_Q = th.cat([self.compute_Q(path) for path in demo_paths])
+
+    #     # agent_paths is a list of length M
+    #     agent_Qs = []
+    #     for agent_paths in agent_paths_l:
+    #         agent_Q = th.cat([self.compute_Q(path) for path in agent_paths])
+    #         agent_Qs.append(agent_Q)
+        
+    #     agent_Qs = th.stack(agent_Qs, dim=0)
+    #     agent_log_probs = th.stack(agent_log_probs_l, dim=0)
+
+    #     loss = th.mean(-demo_Q + th.logsumexp(agent_Qs - agent_log_probs, dim=0))
+    #     self.optimizer.zero_grad()
+    #     loss.backward()
+    #     self.optimizer.step()
+
+    #     metrics = {
+    #         'Loss': loss,
+    #         'demo_Q': demo_Q,
+    #         'agent_Q': agent_Q,
+    #         'agent_log_probs': agent_log_probs,
+    #     }
+    #     utils.log_disc_metrics(self.logger, metrics)
+    #     self.logger.dump(itr)
 
 
 
@@ -242,7 +279,6 @@ class RewardNet(nn.Module):
 
     #     # Compute Q values for agent paths
     #     agent_Q = th.cat([self.compute_Q(path) for path in agent_paths])
-    #     # agent_lse_Q = th.logsumexp(agent_Q - agent_log_probs, dim=0, keepdim=True)
 
     #     # Reward loss
     #     loss = th.mean(-demo_Q + agent_Q - agent_log_probs)

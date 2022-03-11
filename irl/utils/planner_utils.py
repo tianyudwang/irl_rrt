@@ -325,9 +325,6 @@ def fixed_horizon_paths(
             fixed_paths.append(path[:T])
         else:
             padded = th.tile(path[-1], dims=(T-len(path), 1))
-            import ipdb; ipdb.set_trace()
             fixed_paths.append(th.cat((path, padded), dim=0))
-    import ipdb; ipdb.set_trace()
-    fixed_paths = th.stack()
-
+    fixed_paths = th.stack(fixed_paths, dim=0)
     return fixed_paths
