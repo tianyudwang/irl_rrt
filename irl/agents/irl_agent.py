@@ -53,6 +53,8 @@ class IRL_Agent(BaseAgent):
 
         # Replay buffer to hold demo transitions
         self.demo_buffer = ReplayBuffer()
+        self.agent_buffer = ReplayBuffer()
+
 
     def init_env(self):
         """Load environment with fixed random seed"""
@@ -99,7 +101,13 @@ class IRL_Agent(BaseAgent):
             self.params['expert_policy'], self.params['demo_size'])
         self.demo_buffer.add_rollouts(demo_paths)
 
-        for itr in tqdm(range(self.params['n_iter'])):    
+        for itr in tqdm(range(self.params['n_iter'])):  
+
+            # Optimize policy
+            # policy_logs = self.train_policy(agent_paths_l, agent_log_probs_l)
+            self.train_policy()
+
+
             # Sample expert transitions from replay buffer
             demo_transitions = self.demo_buffer.sample_random_transitions(
                 self.params['transitions_per_itr']
@@ -130,49 +138,56 @@ class IRL_Agent(BaseAgent):
 
             # Optimize reward
             for i in range(self.params['reward_updates_per_itr']):
-                # # Sample agent actions with log probs and plan from agent next states
-                # agent_actions, agent_log_probs = utils.sample_agent_action_log_prob(
-                #     demo_states,
-                #     self.policy
-                # )
-                # agent_next_states = pu.next_states_from_env(self.env, demo_states, agent_actions)
-                # agent_paths = pu.plan_from_states(
-                #     planner, 
-                #     agent_next_states, 
-                #     self.reward.cost_fn, 
-                #     solveTime=0.02
-                # )
-                # agent_paths = pu.add_states_to_paths(demo_states, agent_paths)
-                # agent_paths = pu.fixed_horizon_paths(agent_paths, self.max_episode_steps)
-                # self.reward.update(demo_paths, agent_paths, agent_log_probs, itr)
+
+                if self.params['sample_from_agent_buffer']:
+                    agent_transitions = self.agent_buffer.sample_random_transitions(
+                        self.params['transitions_per_itr']
+                    )
+                    agent_states = ptu.from_numpy(
+                        np.stack([transition.state for transition in agent_transitions])
+                    )
+                else:
+                    agent_states = demo_states
+
+                # Sample agent actions with log probs and plan from agent next states
+                agent_actions, agent_log_probs = utils.sample_agent_action_log_prob(
+                    agent_states,
+                    self.policy
+                )
+                agent_next_states = pu.next_states_from_env(self.env, demo_states, agent_actions)
+                agent_paths = pu.plan_from_states(
+                    planner, 
+                    agent_next_states, 
+                    self.reward.cost_fn, 
+                    solveTime=0.02
+                )
+                agent_paths = pu.add_states_to_paths(demo_states, agent_paths)
+                agent_paths = pu.fixed_horizon_paths(agent_paths, self.max_episode_steps)
+                self.reward.update(demo_paths, agent_paths, agent_log_probs, itr)
 
                 # Multiple agent actions sampled per expert transition
                 # Sample agent actions with log probs and plan from agent next states
-                agent_paths_l, agent_log_probs_l = [], []
-                for j in range(self.params['agent_actions_per_demo_transition']):
-                    agent_actions, agent_log_probs = utils.sample_agent_action_log_prob(
-                        demo_states,
-                        self.policy
-                    )
-                    agent_next_states = pu.next_states_from_env(self.env, demo_states, agent_actions)
-                    agent_paths = pu.plan_from_states(
-                        planner, 
-                        agent_next_states, 
-                        self.reward.cost_fn, 
-                        solveTime=0.02
-                    )
-                    agent_paths = pu.add_states_to_paths(demo_states, agent_paths)
-                    agent_paths_l.append(agent_paths)
-                    agent_log_probs_l.append(agent_log_probs)
-                agent_paths_l = [pu.fixed_horizon_paths(path, self.max_episode_steps) for path in agent_paths_l]
-                agent_paths_l = th.stack(agent_paths_l, dim=1)
-                agent_log_probs_l = th.unsqueeze(th.stack(agent_log_probs_l, dim=1), dim=-1)
+                # agent_paths_l, agent_log_probs_l = [], []
+                # for j in range(self.params['agent_actions_per_demo_transition']):
+                #     agent_actions, agent_log_probs = utils.sample_agent_action_log_prob(
+                #         demo_states,
+                #         self.policy
+                #     )
+                #     agent_next_states = pu.next_states_from_env(self.env, demo_states, agent_actions)
+                #     agent_paths = pu.plan_from_states(
+                #         planner, 
+                #         agent_next_states, 
+                #         self.reward.cost_fn, 
+                #         solveTime=0.02
+                #     )
+                #     agent_paths = pu.add_states_to_paths(demo_states, agent_paths)
+                #     agent_paths_l.append(agent_paths)
+                #     agent_log_probs_l.append(agent_log_probs)
+                # agent_paths_l = [pu.fixed_horizon_paths(path, self.max_episode_steps) for path in agent_paths_l]
+                # agent_paths_l = th.stack(agent_paths_l, dim=1)
+                # agent_log_probs_l = th.unsqueeze(th.stack(agent_log_probs_l, dim=1), dim=-1)
+                # self.reward.update(demo_paths, agent_paths_l, agent_log_probs_l, itr)
 
-                self.reward.update(demo_paths, agent_paths_l, agent_log_probs_l, itr)
-
-            # Optimize policy
-            # policy_logs = self.train_policy(agent_paths_l, agent_log_probs_l)
-            self.train_policy()
 
             # Perform logging
             print('\nBeginning logging procedure...')
@@ -217,6 +232,9 @@ class IRL_Agent(BaseAgent):
         batch_size = self.params['policy_update_batch_size']
         self.policy.learn(total_timesteps=self.max_episode_steps*batch_size, log_interval=10)
 
+        # Move rollouts to agent replay buffer
+        agent_paths = utils.sample_trajectories(self.irl_env, self.policy, batch_size)
+        self.agent_buffer.add_rollouts(agent_paths)
 
     #####################################################
     #####################################################

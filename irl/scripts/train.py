@@ -31,13 +31,13 @@ def main():
         help='Number of agent actions/paths to sample per expert transition'
     )
     parser.add_argument(
+        '--sample_from_agent_buffer', action='store_true',
+        help='Use agent trajectories for reward update'
+    )
+    parser.add_argument(
         '--policy_update_batch_size', type=int, default=32,
         help='Number of trajectories for generator training'
     )
-    # parser.add_argument(
-    #     '--agent_actions_per_demo_transition', type=int, default=4,
-    #     help='Number of agent actions sampled for each expert_transition'
-    # )
     parser.add_argument(
         '--eval_batch_size', type=int, default=32,
         help='Number of policy rollouts for evaluation'
@@ -45,6 +45,7 @@ def main():
 
     parser.add_argument('--n_layers', '-l', type=int, default=2)
     parser.add_argument('--size', '-s', type=int, default=32)
+    parser.add_argument('--activation', '-a', type=str, default='relu')    
     parser.add_argument('--output_size', type=int, default=1)
     parser.add_argument('--output_activation', '-oa', type=str, default='relu')
     parser.add_argument('--learning_rate', '-lr', type=float, default=1e-3)

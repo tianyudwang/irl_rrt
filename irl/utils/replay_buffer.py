@@ -4,7 +4,8 @@ import irl.utils.types as types
 
 class ReplayBuffer:
 
-    def __init__(self):
+    def __init__(self, max_size=100):
+        self.max_size = max_size        # Maximum number of episodes to store in buffer
         self.trajectories = []
         self.transitions = []
 
@@ -13,7 +14,13 @@ class ReplayBuffer:
         self.trajectories.extend(trajectories)
         transitions = types.convert_trajectories_to_transitions(trajectories)
         self.transitions.extend(transitions)
+        
+        if len(self.trajectories) > self.max_size:
+            self.trajectories = self.trajectories[-self.max_size:]
 
+        if len(self.transitions) > self.max_size*len(self.trajectories[0]):
+            self.transitions = self.transitions[-self.max_size*len(self.trajectories[0]):]
+        
         print(f"Replay buffer contains {len(self.transitions)} transitions")
 
     def sample_random_transitions(self, batch_size: int) -> List[types.Transition]:
