@@ -32,6 +32,8 @@ class RewardNet(nn.Module):
         self.model = self.init_model(device=self.device)
         self.model_cpu = self.init_model(device=self.device_cpu)
 
+        self.sigmoid = nn.Sigmoid()
+
         self.optimizer = optim.Adam(
             self.model.parameters(),
             lr=self.reward_params['learning_rate'],
@@ -94,6 +96,7 @@ class RewardNet(nn.Module):
         with th.no_grad():
             x1, x2 = self.preprocess_input(x1, x2, self.device_cpu)
             reward = self(self.model_cpu, x1, x2)
+            # reward = self.sigmoid(reward)
         return reward.item()
 
     def gail_reg(self, path):
@@ -193,6 +196,44 @@ class RewardNet(nn.Module):
     #     print("\n", output_str)
     #     return train_reward_log
 
+    # def update(
+    #     self,
+    #     demo_paths: th.Tensor,
+    #     agent_paths: th.Tensor,
+    #     agent_log_probs: th.Tensor,
+    #     itr
+    # ):
+    #     """
+    #     batch of single paths with fixed horizon
+    #     demo_paths and agent_paths: (batch_size, T, state_dim)
+    #     agent_log_probs: (batch_size, 1)
+    #     """
+    #     states, next_states = demo_paths[:,:-1], demo_paths[:,1:]
+    #     reward = self(self.model, states, next_states)
+    #     demo_Q = th.sum(reward, dim=1)
+
+    #     states, next_states = agent_paths[:,:-1], agent_paths[:,1:]
+    #     reward = self(self.model, states, next_states)
+    #     agent_Q = th.sum(reward, dim=1)
+
+    #     # Reward loss
+    #     loss = th.mean(-demo_Q + agent_Q - agent_log_probs)
+    #     self.optimizer.zero_grad()
+    #     loss.backward()
+    #     self.optimizer.step()
+
+    #     # Log metrics
+    #     metrics = {
+    #         'Loss': loss,
+    #         'demo_Q': demo_Q,
+    #         'agent_Q': agent_Q,
+    #         'agent_log_probs': agent_log_probs,
+    #         'Q_diff': demo_Q - agent_Q
+    #     }
+    #     utils.log_disc_metrics(self.logger, metrics)
+    #     self.logger.dump(itr)
+
+
     def update(
         self,
         demo_paths: th.Tensor,
@@ -201,21 +242,32 @@ class RewardNet(nn.Module):
         itr
     ):
         """
-        demo_paths and agent_paths: batch_size x T x state_dim
-        agent_log_probs: batch_size x 1
+        batch of multiple agent paths with fixed horizon
+        demo_paths: (batch_size, T, state_dim)
+        agent_paths: (batch_size, n_agent_actions, T, state_dim)
+        agent_log_probs: (batch_size, n_agent_actions, 1)
         """
         states, next_states = demo_paths[:,:-1], demo_paths[:,1:]
         reward = self(self.model, states, next_states)
         demo_Q = th.sum(reward, dim=1)
 
-        states, next_states = agent_paths[:,:-1], agent_paths[:,1:]
+        states, next_states = agent_paths[:,:,:-1], agent_paths[:,:,1:]
         reward = self(self.model, states, next_states)
-        agent_Q = th.sum(reward, dim=1)
+        agent_Q = th.sum(reward, dim=2)
+
+        agent_Q_lse = th.logsumexp(agent_Q - agent_log_probs, dim=1)
 
         # Reward loss
-        loss = th.mean(-demo_Q + agent_Q - agent_log_probs)
+        loss = th.mean(-demo_Q + agent_Q_lse)
         self.optimizer.zero_grad()
         loss.backward()
+
+        # Check gradient norm
+        grad_norms = []
+        for p in list(filter(lambda p: p.grad is not None, self.model.parameters())):
+            grad_norms.append(p.grad.detach().data.norm(2))
+        grad_norms = th.stack(grad_norms)
+
         self.optimizer.step()
 
         # Log metrics
@@ -223,12 +275,13 @@ class RewardNet(nn.Module):
             'Loss': loss,
             'demo_Q': demo_Q,
             'agent_Q': agent_Q,
+            'agent_Q_lse': agent_Q_lse,
             'agent_log_probs': agent_log_probs,
-            'Q_diff': demo_Q - agent_Q
+            'Q_diff': demo_Q - agent_Q_lse,
+            'gradient': grad_norms, 
         }
         utils.log_disc_metrics(self.logger, metrics)
         self.logger.dump(itr)
-
 
     # def update(
     #     self,

@@ -19,7 +19,7 @@ def main():
         help='Number of expert paths to add to replay buffer'
     )
     parser.add_argument(
-        '--reward_updates_per_itr', type=int, default=4,
+        '--reward_updates_per_itr', type=int, default=1,
         help='Number of reward updates per iteration'
     )    
     parser.add_argument(
