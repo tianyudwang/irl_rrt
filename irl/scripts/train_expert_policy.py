@@ -2,15 +2,13 @@ import argparse
 import gym
 import numpy as np
 
-
-
 def build_env(env_name):
     """
     Make env and add env wrappers
     """
     if env_name == 'Reacher-v2':
         env = gym.make(env_name)
-        from irl.utils.wrappers import ReacherWrapper
+        from gcl.utils.wrappers import ReacherWrapper
         env = ReacherWrapper(env)
     else:
         raise ValueError('Environment {} not supported yet ...'.format(env_name))

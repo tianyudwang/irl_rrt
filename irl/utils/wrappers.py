@@ -2,7 +2,7 @@ import gym
 import numpy as np 
 
 # Custom env wrapper to change reward function 
-class IRLEnv(gym.Wrapper):
+class IRLWrapper(gym.Wrapper):
     def __init__(self, env, reward):
         gym.Wrapper.__init__(self, env)
         self.env = env
@@ -13,7 +13,8 @@ class IRLEnv(gym.Wrapper):
         Override the true environment reward with learned reward
         """
         obs, reward, done, info = self.env.step(action)
-        nn_reward = self.reward.reward_fn(self.last_obs, obs)
+        # nn_reward = self.reward(self.last_obs, action)
+        nn_reward = self.reward(self.last_obs, obs)
         self.last_obs = obs.copy()
         # print(reward, nn_reward)
         return obs, nn_reward, done, info

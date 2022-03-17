@@ -1,57 +1,54 @@
 from typing import List
+
 import argparse
 import os
 import time
 
 from irl.agents.irl_agent import IRL_Agent
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_name', type=str, default='Reacher-v2')
-    parser.add_argument('--expert_policy', type=str, default='SAC_Reacher-v2')
+    parser.add_argument('--expert_policy', type=str, default='SAC_Reacher-v2')    
     parser.add_argument('--suffix', type=str, default=None)
-        
+
     parser.add_argument(
         '--n_iter', '-n', type=int, default=200,
         help='Number of total iterations')
     parser.add_argument(
         '--demo_size', type=int, default=100, 
-        help='Number of expert paths to add to replay buffer'
+        help='Number of expert demonstration trajectories to collect'
     )
     parser.add_argument(
-        '--reward_updates_per_itr', type=int, default=1,
+        '--reward_update_batch_size', type=int, default=32, 
+        help='Number of transitions for reward training'
+    )
+    parser.add_argument('--agent_action_from_demo_state', '-aa', action='store_true')
+    parser.add_argument(
+        '--policy_update_batch_size', type=int, default=32, 
+        help='Number of episodes for policy training'
+    )
+    parser.add_argument(
+        '--n_reward_updates_per_itr', type=int, default=2, 
         help='Number of reward updates per iteration'
-    )    
-    parser.add_argument(
-        '--transitions_per_itr', type=int, default=32,
-        help='Number of expert transitions to sample per iteration'
-    )
-    parser.add_argument(
-        '--agent_actions_per_demo_transition', type=int, default=8,
-        help='Number of agent actions/paths to sample per expert transition'
-    )
-    parser.add_argument(
-        '--sample_from_agent_buffer', action='store_true',
-        help='Use agent trajectories for reward update'
-    )
-    parser.add_argument(
-        '--policy_update_batch_size', type=int, default=32,
-        help='Number of trajectories for generator training'
     )
     parser.add_argument(
         '--eval_batch_size', type=int, default=32,
-        help='Number of policy rollouts for evaluation'
+        help='Number of policy rollout episodes to collect for evaluation'
     )
 
-    parser.add_argument('--n_layers', '-l', type=int, default=2)
-    parser.add_argument('--size', '-s', type=int, default=32)
-    parser.add_argument('--activation', '-a', type=str, default='relu')    
-    parser.add_argument('--output_size', type=int, default=1)
-    parser.add_argument('--output_activation', '-oa', type=str, default='relu')
-    parser.add_argument('--learning_rate', '-lr', type=float, default=1e-3)
+    # NN parameters
+    parser.add_argument('--learning_rate', '-lr', type=float, default=3e-4)
     parser.add_argument('--weight_decay', '-wd', type=float, default=0)
+    parser.add_argument('--size', '-s', type=int, default=32)
+    parser.add_argument('--n_layers', type=int, default=2)
+    parser.add_argument('--activation', '-a', type=str, default='relu')
+    parser.add_argument('--output_size', '-os', type=int, default=1)
+    parser.add_argument('--output_activation', '-oa', type=str, default='relu')
     parser.add_argument('--lcr_reg', type=float, default=0)
     parser.add_argument('--gail_reg', type=float, default=0)
+    parser.add_argument('--grad_norm', type=float, default=-1)
 
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--no_gpu', '-ngpu', action='store_true')
@@ -80,10 +77,13 @@ def main():
         logdir += '_' + params['suffix']
     params['logdir'] = logdir
     print(params)
+    # if not(os.path.exists(logdir)):
+    #     os.makedirs(logdir)
 
     ###################
     ### RUN TRAINING
     ###################
+
     irl_model = IRL_Agent(params)
     irl_model.train()
 

@@ -13,11 +13,7 @@ from ompl import control as oc
 
 import gym
 import torch as th
-# import torch.multiprocessing as mp 
-import irl.planners.geometric_planner as gp
-import irl.planners.control_planner as cp
 import irl.utils.pytorch_utils as ptu
-from irl.utils.wrappers import ReacherWrapper
 
 PlannerStatus = {
     'Exact solution': 1,
@@ -259,7 +255,7 @@ def next_states_from_env(
     return ptu.from_numpy(np.stack(next_states))
 
 def plan_from_states(
-    planner: gp.ReacherGeometricPlanner,
+    planner,
     states: th.Tensor,
     cost_fn: Callable[[np.ndarray, np.ndarray], float],
     solveTime: Optional[float] = 1.0,
@@ -274,7 +270,7 @@ def plan_from_states(
     return paths
 
 def plan_from_state(
-    planner: gp.ReacherGeometricPlanner,
+    planner,
     state: np.ndarray,
     cost_fn: Callable[[np.ndarray, np.ndarray], float],
     solveTime: Optional[float] = 1.0,

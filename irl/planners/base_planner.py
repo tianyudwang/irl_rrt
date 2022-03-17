@@ -5,7 +5,6 @@ import numpy as np
 from ompl import util as ou
 from ompl import base as ob
 
-
 from irl.utils import planner_utils
 
 
@@ -69,8 +68,8 @@ class ReacherBasePlanner:
         self.state_dim = 4
         # 2 joint torque
         self.control_dim = 2
-        ou.setLogLevel(ou.LogLevel.LOG_ERROR)
-        # ou.setLogLevel(ou.LogLevel.LOG_WARN)
+        # ou.setLogLevel(ou.LogLevel.LOG_ERROR)
+        ou.setLogLevel(ou.LogLevel.LOG_WARN)
 
     def get_StateSpace(self) -> ob.StateSpace:
         """
@@ -130,8 +129,10 @@ class ReacherBasePlanner:
         )        
         return start_state
 
-    def update_ss_cost(self, cost_fn: Callable, target: np.ndarray):
+    def update_ss_cost(self, cost_fn: Callable, target: np.ndarray, debug=False):
         # Set up cost function
-        # self.objective = planner_utils.ReacherIRLObjective(self.si, cost_fn, target)
-        self.objective = planner_utils.ReacherShortestDistanceObjective(self.si, target)
+        if debug:
+            self.objective = planner_utils.ReacherShortestDistanceObjective(self.si, target)
+        else:
+            self.objective = planner_utils.ReacherIRLObjective(self.si, cost_fn, target)
         self.ss.setOptimizationObjective(self.objective)

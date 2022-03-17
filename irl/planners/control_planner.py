@@ -7,8 +7,8 @@ from ompl import util as ou
 from ompl import base as ob
 from ompl import control as oc
 
-from irl.planners.base_planner import ReacherBasePlanner
-from irl.utils import planner_utils
+from gcl.planners.base_planner import ReacherBasePlanner
+from gcl.utils import planner_utils
 
 np.set_printoptions(precision=3)
 

@@ -15,7 +15,7 @@ class ReacherGeometricPlanner(ReacherBasePlanner):
     Instantiate StateSpace, SimpleSetup, SpaceInformation, OptimizationObjective, etc
     """
 
-    def __init__(self):
+    def __init__(self): 
         super().__init__()
 
         # First set up StateSpace and ControlSpace and SimpleSetup
@@ -131,7 +131,7 @@ class ReacherPRMstarPlanner(ReacherGeometricPlanner):
                     f"{msg}: "
                     f"Path length is {geometric_path.length():.2f}, "
                     f"cost is {geometric_path.cost(objective).value():.2f}, ",
-                    f"solve time is {t:.2f}"
+                    f"solve time is {t:.3f}"
                 )
             states = planner_utils.states_to_numpy(states)
             return status.asString(), states, None

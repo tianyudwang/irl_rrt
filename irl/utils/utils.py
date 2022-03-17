@@ -1,5 +1,4 @@
 from typing import Optional, Union, Any, Tuple, List
-import time
 
 import gym
 import numpy as np
@@ -8,13 +7,9 @@ import torch as th
 from stable_baselines3 import SAC
 from stable_baselines3.sac.policies import Actor
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
-from stable_baselines3.common.policies import BaseModel
 
 from irl.utils import pytorch_utils as ptu
 from irl.utils import types
-
-############################################
-############################################
 
 def sample_trajectory(
     env: gym.Env, 
@@ -73,12 +68,11 @@ def sample_trajectory(
         log_probs=np.array(log_probs)
     )
 
-
 def action_log_prob(
     policy: Union[OffPolicyAlgorithm, Actor],
     ob: np.ndarray,
     log_min: Optional[float] = -20.0,
-    log_max: Optional[float] = 10.0,
+    log_max: Optional[float] = 2.0,
 ) -> np.ndarray:
     """Query SB3 policy model for action and corresponding log probability"""
     if isinstance(policy, OffPolicyAlgorithm):
@@ -108,6 +102,32 @@ def sample_agent_action_log_prob(
         assert False, f"Policy class {type(policy)} not implemented"
     actions, log_probs = policy.action_log_prob(demo_states)
     return actions, log_probs
+
+# def eval_log_probs(
+#     policy: Union[OffPolicyAlgorithm, Actor],
+#     ob: th.Tensor,
+#     ac: th.Tensor,
+#     log_min: Optional[float] = -20.0,
+#     log_max: Optional[float] = 2.0,
+# ) -> np.ndarray:
+#     """Query SB3 policy model for action log probability"""
+#     if isinstance(policy, OffPolicyAlgorithm):
+#         policy = policy.policy.actor
+#     elif isinstance(policy, Actor):
+#         pass
+#     else:
+#         raise ValueError(f"Policy type {type(policy)} is not implemented")
+#     # ob, _ = policy.obs_to_tensor(ob)
+#     batch_size, T, ob_dim = ob.shape
+#     ac_dim = ac.shape[-1]
+#     ob = ob.reshape(-1, ob_dim)
+#     ac = ac.reshape(-1, ac_dim)
+
+#     mean_actions, log_std, kwargs = policy.get_action_dist_params(ob)
+#     policy.action_dist.proba_distribution(mean_actions, log_std)
+#     log_probs = policy.action_dist.log_prob(ac)
+#     log_probs = log_probs.reshape(batch_size, T)
+#     return log_probs
 
 def sample_trajectories(
     env: gym.Env, 
@@ -139,10 +159,30 @@ def check_demo_performance(paths):
         f"Demonstrations angular velocity not in range {[-vel_max, vel_max]}, need to rerun collection"
     ) 
 
+def collect_demo_trajectories(env: gym.Env, expert_policy: str, batch_size: int):
+    expert_policy = SAC.load(expert_policy)
+    print('\nRunning expert policy to collect demonstrations...')
+    demo_paths = sample_trajectories(env, expert_policy, batch_size)
+    check_demo_performance(demo_paths)
+    return demo_paths
+
+def extract_paths(paths: List[types.Trajectory]) -> List[th.Tensor]:
+    obs = ptu.from_numpy(np.array([path.states for path in paths]))
+    # Drop the last terminal state
+    obs = obs[:, :-1, :]
+    act = ptu.from_numpy(np.array([path.actions for path in paths]))
+    log_probs = ptu.from_numpy(np.array([path.log_probs for path in paths]))
+    assert obs.shape[0] == act.shape[0] == log_probs.shape[0], (
+        "Batch size is not same for extracted paths"
+    )
+    assert obs.shape[1] == act.shape[1] == log_probs.shape[1], (
+        "Episode length is not same for extracted paths"
+    )
+    return obs, act, log_probs
 
 def log_disc_metrics(logger, metrics):
     for k, v in metrics.items():
-        if v.dim() < 1 or (v.dim == 1 and v.shape[0] <= 1):
+        if v.dim() < 1 or (v.dim() == 1 and v.shape[0] <= 1):
             logger.record_mean(f"Reward/{k}", v.item())
         else:
             logger.record_mean(f"Reward/{k}Max", th.amax(v).item())

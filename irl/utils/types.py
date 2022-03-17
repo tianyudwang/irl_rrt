@@ -63,7 +63,6 @@ class TrajectoryWithReward(Trajectory):
                 f"{self.rewards.shape} != ({len(self.actions)},)",
             )
 
-
 @dataclass(frozen=True)
 class Transition:
     state: np.ndarray
