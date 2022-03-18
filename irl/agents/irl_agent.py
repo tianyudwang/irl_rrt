@@ -99,6 +99,8 @@ class IRL_Agent:
 
         # Build PRM roadmap
         planner = gp.ReacherPRMstarPlanner()
+        self.cost_net.copy_model_to_cpu()
+
         agent_paths = self.agent_buffer.sample_recent_trajectories(batch_size)
         agent_s0 = ptu.from_numpy(np.stack([path.states[0] for path in agent_paths]))
         agent_s1 = ptu.from_numpy(np.stack([path.states[1] for path in agent_paths]))
@@ -122,7 +124,7 @@ class IRL_Agent:
                 planner, 
                 demo_s1, 
                 self.cost_net.cost, 
-                solveTime=0.002
+                solveTime=0.05
             )
             demo_states = pu.add_states_to_paths(demo_s0, demo_states)
             demo_states = pu.fixed_horizon_paths(demo_states, self.max_episode_steps)            
@@ -142,7 +144,7 @@ class IRL_Agent:
                 planner, 
                 agent_s1, 
                 self.cost_net.cost, 
-                solveTime=0.002
+                solveTime=0.05
             )
             agent_states = pu.add_states_to_paths(agent_s0, agent_states)
             agent_states = pu.fixed_horizon_paths(agent_states, self.max_episode_steps)

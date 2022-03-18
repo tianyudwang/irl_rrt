@@ -34,6 +34,9 @@ class CostNet(nn.Module):
             output_activation=self.params['output_activation']
         ).to('cuda')
 
+        self.model = self.build_mlp(device='cuda')
+        self.model_cpu = self.build_mlp(device='cpu')
+
         self.optimizer = optim.Adam(
             self.model.parameters(),
             lr=self.params['learning_rate'],
@@ -46,26 +49,35 @@ class CostNet(nn.Module):
         self.gail_reg_coeff = self.params['gail_reg']
         self.grad_norm = self.params['grad_norm']
 
-    def forward(self, s: th.Tensor, ns: th.Tensor):
+    def build_mlp(self, device='cpu'):
+        model = ptu.build_mlp(
+            # input_size=ob_dim+ac_dim,
+            input_size=self.params['ob_dim']*2,
+            output_size=self.params['output_size'],
+            n_layers=self.params['n_layers'],
+            size=self.params['size'],
+            activation=self.params['activation'],
+            output_activation=self.params['output_activation']
+        ).to(device)
+        return model
+
+    def forward(self, model: nn.Module, s: th.Tensor, ns: th.Tensor):
         s_ns = th.cat([s, ns], dim=-1)
-        cost = self.model(s_ns)        
+        cost = model(s_ns)        
         return cost
 
     def reward(self, s: np.ndarray, ns: np.ndarray):
-        """
-        Query single step reward in gym env, do not track gradient
-        """
+        """Query single step reward in gym env, do not track gradient"""
         assert len(s.shape) == 1 and len(ns.shape) == 1
         with th.no_grad():
-            s = th.unsqueeze(ptu.from_numpy(s), dim=0)
-            ns = th.unsqueeze(ptu.from_numpy(ns), dim=0)
-            cost = self(s, ns)
+            s = th.unsqueeze(th.from_numpy(s).float(), dim=0)
+            ns = th.unsqueeze(th.from_numpy(ns).float(), dim=0)
+            cost = self(self.model_cpu, s, ns)
         reward = -ptu.to_numpy(cost).item()
         return reward
 
     def cost(self, s: np.ndarray, ns: np.ndarray):
         return -self.reward(s, ns)
-
 
     def train_irl(
         self, 
@@ -82,13 +94,13 @@ class CostNet(nn.Module):
         # Compute the first term in IRL loss for demo paths
         # cost_p = self(demo_obs, demo_act)
         s, ns = demo_states[:,:-1], demo_states[:,1:]
-        c_demo = th.sum(self(s, ns), dim=1)
+        c_demo = th.sum(self(self.model, s, ns), dim=1)
         loss_demo = th.mean(c_demo, dim=0)
 
         # Compute second term in IRL loss for agent paths
         # cost_q = self(agent_obs, agent_act)
         s, ns = agent_states[:,:-1], agent_states[:,1:]
-        c_agent = th.sum(self(s, ns), dim=1)
+        c_agent = th.sum(self(self.model, s, ns), dim=1)
         # log_probs = th.sum(agent_log_probs, dim=1, keepdim=True)
         loss_agent = th.logsumexp(-c_agent - agent_log_probs, dim=0)
 
@@ -161,3 +173,9 @@ class CostNet(nn.Module):
         g = -cost - th.logsumexp(th.stack((zeros, cost), dim=-1), dim=-1)
         loss = th.sum(g)
         return loss
+
+    ###############################################
+    def copy_model_to_cpu(self) -> None:
+        PATH = '/tmp/irl_cost_net.pt'
+        th.save(self.model.state_dict(), PATH)
+        self.model_cpu.load_state_dict(th.load(PATH, map_location=th.device("cpu")))

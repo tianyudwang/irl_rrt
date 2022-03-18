@@ -2,6 +2,7 @@ from typing import List
 
 import argparse
 import os
+import os.path as osp
 import time
 
 from irl.agents.irl_agent import IRL_Agent
@@ -66,19 +67,21 @@ def main():
     ### CREATE DIRECTORY FOR LOGGING
     ##################################
 
-    data_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../data')
+    data_path = osp.join(osp.dirname(osp.dirname(osp.dirname(os.path.realpath(__file__)))), 'data')
 
-    if not (os.path.exists(data_path)):
-        os.makedirs(data_path)
 
     logdir = args.env_name + '_' + time.strftime("%d-%m-%Y_%H-%M-%S")
-    logdir = os.path.join(data_path, logdir)
+    logdir = osp.join(data_path, logdir)
     if params['suffix']:
         logdir += '_' + params['suffix']
     params['logdir'] = logdir
     print(params)
-    # if not(os.path.exists(logdir)):
-    #     os.makedirs(logdir)
+
+    # dump params
+    os.makedirs(logdir, exist_ok=True)
+    import json
+    with open(osp.join(logdir, 'params.json'), 'w') as fp:
+        json.dump(params, fp)
 
     ###################
     ### RUN TRAINING
